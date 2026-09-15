@@ -7,8 +7,25 @@ import path from "node:path";
 
 const id = "@openplugins/token-balance";
 const BAR_W = 26;
-const SIDE_W = 36;
 const REFRESH_INTERVAL_MS = 60_000;
+
+// ─── Color helpers ────────────────────────────────────────────────────
+
+function pctColor(pct: number): string {
+  if (pct >= 60) return "#50fa7b";  // green
+  if (pct >= 30) return "#f1fa8c";  // yellow
+  return "#ff5555";                  // red
+}
+
+function barColored(percent: number, width: number): { text: string; color: string } {
+  const p = Math.max(0, Math.min(100, Math.round(percent)));
+  const filled = Math.round((p / 100) * width);
+  const empty = width - filled;
+  return {
+    text: "\u2588".repeat(filled) + "\u2591".repeat(empty),
+    color: pctColor(p),
+  };
+}
 
 // ─── Auth helpers (sync, same pattern as zen-free-panel.tsx) ───────────
 
@@ -21,9 +38,7 @@ function readAuthFile(): Record<string, { type?: string; key?: string }> | undef
       path.join(home, "AppData", "Local", "opencode", "auth.json"),
     ];
     for (const file of candidates) {
-      try {
-        return JSON.parse(fs.readFileSync(file, "utf8"));
-      } catch { /* try next */ }
+      try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { /* try next */ }
     }
   } catch { /* ignore */ }
   return undefined;
@@ -49,12 +64,28 @@ function readZenConfig(): { workspaceId: string; authCookie: string } | undefine
   return undefined;
 }
 
+// ─── Formatting ───────────────────────────────────────────────────────
+
+function formatCompact(ms: number): string {
+  if (ms <= 0) return "ahora";
+  const totalMinutes = Math.ceil(ms / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours >= 1 ? `${hours}h` : `${minutes}m`;
+}
+
 // ─── Provider fetchers ────────────────────────────────────────────────
 
-async function fetchDeepSeek(): Promise<{ text: string; subtext: string }> {
+interface DeepSeekResult {
+  text: string;
+  barPercent: number;  // -1 = no bar
+  barColor: string;
+}
+
+async function fetchDeepSeek(maxBalance: number): Promise<DeepSeekResult> {
   const auth = readAuthFile();
   const key = auth?.deepseek?.key;
-  if (!key) return { text: "sin API key", subtext: "" };
+  if (!key) return { text: "sin API key", barPercent: -1, barColor: "#808080" };
 
   try {
     const res = await fetch("https://api.deepseek.com/user/balance", {
@@ -62,21 +93,34 @@ async function fetchDeepSeek(): Promise<{ text: string; subtext: string }> {
       headers: { Authorization: `Bearer ${key}`, "User-Agent": "token-balance/1.0" },
       signal: AbortSignal.timeout(10000),
     });
-    if (!res.ok) return { text: `error ${res.status}`, subtext: "" };
+    if (!res.ok) return { text: `error ${res.status}`, barPercent: -1, barColor: "#808080" };
     const data = await res.json() as Record<string, unknown>;
     const infos = Array.isArray(data.balance_infos) ? data.balance_infos : [];
     const usd = infos.find((i: any) => i.currency === "USD") ?? infos[0];
     if (usd?.total_balance) {
-      return { text: `Total balance               USD ${parseFloat(usd.total_balance).toFixed(2)}`, subtext: "" };
+      const balance = parseFloat(usd.total_balance);
+      const pct = maxBalance > 0 ? Math.round((balance / maxBalance) * 100) : -1;
+      return {
+        text: `Total balance               USD ${balance.toFixed(2)}`,
+        barPercent: pct,
+        barColor: pct >= 0 ? pctColor(pct) : "#808080",
+      };
     }
-    return { text: "sin datos", subtext: "" };
-  } catch { return { text: "error de conexion", subtext: "" }; }
+    return { text: "sin datos", barPercent: -1, barColor: "#808080" };
+  } catch { return { text: "error de conexion", barPercent: -1, barColor: "#808080" }; }
 }
 
-async function fetchOpenCodeGo(): Promise<string[]> {
+interface GoLine {
+  label: string;
+  remaining: string;
+  barText: string;
+  barColor: string;
+}
+
+async function fetchOpenCodeGo(): Promise<GoLine[]> {
   const auth = readAuthFile();
   const key = auth?.["opencode-go"]?.key ?? auth?.opencode?.key;
-  if (!key) return ["sin API key"];
+  if (!key) return [{ label: "", remaining: "sin API key", barText: "", barColor: "#808080" }];
 
   try {
     const res = await fetch("https://opencode.ai/zen/go/v1/usage", {
@@ -84,12 +128,12 @@ async function fetchOpenCodeGo(): Promise<string[]> {
       headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
       signal: AbortSignal.timeout(10000),
     });
-    if (!res.ok) return [`error ${res.status}`];
+    if (!res.ok) return [{ label: "", remaining: `error ${res.status}`, barText: "", barColor: "#808080" }];
     const data = await res.json() as Record<string, unknown>;
     const usage = data?.usage as Record<string, unknown> | undefined;
-    if (!usage) return ["sin datos"];
+    if (!usage) return [{ label: "", remaining: "sin datos", barText: "", barColor: "#808080" }];
 
-    const lines: string[] = [];
+    const lines: GoLine[] = [];
     const windows = [
       { key: "rolling", label: "Five-hour" },
       { key: "weekly", label: "Weekly" },
@@ -103,18 +147,16 @@ async function fetchOpenCodeGo(): Promise<string[]> {
       const resetsAt = typeof win.resetsAt === "string" ? win.resetsAt : "";
       const resetMs = resetsAt ? Math.max(0, Date.parse(resetsAt) - Date.now()) : 0;
       const rem = formatCompact(resetMs);
-      const filled = Math.round((remaining / 100) * BAR_W);
-      const barStr = "\u2588".repeat(filled) + "\u2591".repeat(BAR_W - filled);
-      lines.push(`${w.label.padEnd(27)}${rem}`);
-      lines.push(`${barStr}   ${Math.round(remaining)}% left`);
+      const bar = barColored(remaining, BAR_W);
+      lines.push({ label: w.label, remaining: rem, barText: bar.text, barColor: bar.color });
     }
-    return lines.length > 0 ? lines : ["sin datos"];
-  } catch { return ["error de conexion"]; }
+    return lines.length > 0 ? lines : [{ label: "", remaining: "sin datos", barText: "", barColor: "#808080" }];
+  } catch { return [{ label: "", remaining: "error de conexion", barText: "", barColor: "#808080" }]; }
 }
 
-async function fetchOpenCodeZen(): Promise<{ text: string; barFill: number; color: string }> {
+async function fetchOpenCodeZen(): Promise<{ text: string; barFill: number; barColor: string }> {
   const config = readZenConfig();
-  if (!config) return { text: "sin config", barFill: 0, color: "#808080" };
+  if (!config) return { text: "sin config", barFill: 0, barColor: "#808080" };
 
   try {
     const url = `https://opencode.ai/workspace/${encodeURIComponent(config.workspaceId)}/billing`;
@@ -127,16 +169,14 @@ async function fetchOpenCodeZen(): Promise<{ text: string; barFill: number; colo
       },
       signal: AbortSignal.timeout(10000),
     });
-    if (!res.ok) return { text: `error ${res.status}`, barFill: 0, color: "#808080" };
+    if (!res.ok) return { text: `error ${res.status}`, barFill: 0, barColor: "#808080" };
     const html = await res.text();
 
-    // Parse billing data from HTML
     const BILLING_UNITS = 100_000_000;
     let balance = 0;
     let monthlyLimit: number | null = null;
     let monthlyUsage: number | null = null;
 
-    // Try SSR pattern
     const ssrRe = /\b(balance|monthlyLimit|monthlyUsage)\s*:\s*(\d+(?:\.\d+)?)\b/g;
     const fields: Record<string, number> = {};
     for (const m of html.matchAll(ssrRe)) fields[m[1]] = Number(m[2]);
@@ -146,89 +186,84 @@ async function fetchOpenCodeZen(): Promise<{ text: string; barFill: number; colo
       monthlyUsage = Number.isFinite(fields.monthlyUsage) && fields.monthlyUsage >= 0 ? fields.monthlyUsage / BILLING_UNITS : null;
     }
 
-    if (balance <= 0) return { text: "sin datos", barFill: 0, color: "#808080" };
+    if (balance <= 0) return { text: "sin datos", barFill: 0, barColor: "#808080" };
 
     if (monthlyLimit !== null && monthlyUsage !== null && monthlyLimit > 0) {
       const remaining = Math.max(0, monthlyLimit - monthlyUsage);
       const pct = Math.round((remaining / monthlyLimit) * 100);
       const filled = Math.round((pct / 100) * BAR_W);
-      const color = pct >= 60 ? "#50fa7b" : pct >= 30 ? "#f1fa8c" : "#ff5555";
-      return { text: `Balance                USD ${balance.toFixed(2)}`, barFill: filled, color };
+      return { text: `Balance                USD ${balance.toFixed(2)}`, barFill: filled, barColor: pctColor(pct) };
     }
-    return { text: `Balance                USD ${balance.toFixed(2)}`, barFill: 0, color: "#808080" };
-  } catch { return { text: "error de conexion", barFill: 0, color: "#808080" }; }
-}
-
-async function fetchZenFree(): Promise<string> {
-  const auth = readAuthFile();
-  const key = auth?.opencode?.key;
-  if (!key) return "sin API key";
-
-  const models = [
-    "big-pickle", "deepseek-v4-flash-free", "muse-spark-1.3-contributor-free",
-    "muse-spark-1.2-contributor-free", "mimo-v2.5-free", "ling-3.0-flash-fin-free",
-    "nemotron-3-ultra-free", "nemotron-3.5-lightning-free",
-  ];
-
-  try {
-    const results = await Promise.all(models.map(async (model) => {
-      try {
-        const res = await fetch("https://opencode.ai/zen/v1/chat/completions", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ model, messages: [{ role: "user", content: "." }], max_tokens: 1 }),
-          signal: AbortSignal.timeout(8000),
-        });
-        if (res.status === 200) return "ok";
-        if (res.status === 400) {
-          const body = await res.text();
-          if (body.includes("MissingSessionID")) return "ok";
-        }
-        return "error";
-      } catch { return "error"; }
-    }));
-    const okCount = results.filter((r) => r === "ok").length;
-    if (okCount > 0) return `Disponibles                    ahora`;
-    return "sin modelos disponibles";
-  } catch { return "error de conexion"; }
-}
-
-// ─── Formatting helpers ───────────────────────────────────────────────
-
-function formatCompact(ms: number): string {
-  if (ms <= 0) return "ahora";
-  const totalMinutes = Math.ceil(ms / 60000);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return hours >= 1 ? `${hours}h` : `${minutes}m`;
+    return { text: `Balance                USD ${balance.toFixed(2)}`, barFill: 0, barColor: "#808080" };
+  } catch { return { text: "error de conexion", barFill: 0, barColor: "#808080" }; }
 }
 
 // ─── TUI Plugin ───────────────────────────────────────────────────────
 
-const tui: TuiPlugin = async (api: TuiPluginApi) => {
+const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
+  // Plugin option: deepseekMaxBalance (total USD loaded)
+  const maxBalance = typeof options?.deepseekMaxBalance === "number" ? options.deepseekMaxBalance : 0;
+
+  // Register /set-max-balance command
+  api.keymap?.registerLayer({
+    commands: [
+      {
+        namespace: "palette",
+        name: "token-balance.set-max-balance",
+        title: "Set DeepSeek Max Balance",
+        desc: "Set the total USD loaded in DeepSeek for percentage display",
+        category: "Token Balance",
+        slashName: "set-max-balance",
+        run() {
+          api.ui?.dialog?.replace?.(() =>
+            api.ui.DialogPrompt({
+              title: "DeepSeek Max Balance",
+              description: () => "Enter the total USD you loaded (e.g. 8 for $8):",
+              placeholder: "8",
+              onConfirm(value: string) {
+                const num = parseFloat(value);
+                if (Number.isFinite(num) && num > 0) {
+                  api.kv?.set("token-balance.deepseekMaxBalance", num);
+                  api.ui.toast({ variant: "success", message: `DeepSeek max balance set to $${num.toFixed(2)}` });
+                } else {
+                  api.ui.toast({ variant: "error", message: "Invalid amount" });
+                }
+                api.ui.dialog?.clear();
+              },
+              onCancel() { api.ui.dialog?.clear(); },
+            })
+          );
+        },
+      },
+    ],
+    bindings: [],
+  });
+
+  // Read maxBalance from kv if not set via options
+  const getMaxBalance = () => {
+    if (maxBalance > 0) return maxBalance;
+    const kv = api.kv?.get<number>("token-balance.deepseekMaxBalance", 0);
+    return typeof kv === "number" && kv > 0 ? kv : 0;
+  };
+
   const dispose = createRoot((disposeRoot) => {
-    const [dsData, setDsData] = createSignal({ text: "consultando...", subtext: "" });
-    const [goData, setGoData] = createSignal(["consultando..."]);
-    const [zenData, setZenData] = createSignal({ text: "consultando...", barFill: 0, color: api.theme.current.textMuted });
-    const [freeData, setFreeData] = createSignal("consultando...");
+    const [dsData, setDsData] = createSignal<DeepSeekResult>({ text: "consultando...", barPercent: -1, barColor: "#808080" });
+    const [goData, setGoData] = createSignal<GoLine[]>([{ label: "", remaining: "consultando...", barText: "", barColor: "#808080" }]);
+    const [zenData, setZenData] = createSignal<{ text: string; barFill: number; barColor: string }>({ text: "consultando...", barFill: 0, barColor: "#808080" });
     let disposed = false;
 
     const refresh = async () => {
       if (disposed) return;
-
-      // Fetch all providers in parallel
-      const [ds, go, zen, free] = await Promise.all([
-        fetchDeepSeek(),
+      const mb = getMaxBalance();
+      const [ds, go, zen] = await Promise.all([
+        fetchDeepSeek(mb),
         fetchOpenCodeGo(),
         fetchOpenCodeZen(),
-        fetchZenFree(),
       ]);
-
       if (disposed) return;
       setDsData(ds);
       setGoData(go);
       setZenData(zen);
-      setFreeData(free);
     };
 
     void refresh();
@@ -241,11 +276,6 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
           const ds = dsData();
           const go = goData();
           const zen = zenData();
-          const free = freeData();
-
-          const zenInfo = zen.barFill > 0
-            ? zen.text
-            : zen.text;
 
           return (
             <box gap={0}>
@@ -256,15 +286,26 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
               <text fg={api.theme.current.text} wrapMode="none">
                 {ds.text}
               </text>
+              {ds.barPercent >= 0 ? (() => {
+                const b = barColored(ds.barPercent, BAR_W);
+                return <text fg={b.color} wrapMode="none">{b.text}   {ds.barPercent}%</text>;
+              })() : null}
 
               {/* OpenCode Go */}
               <text fg={api.theme.current.textMuted} wrapMode="none">
                 {"\uD83D\uDC19 OpenCode Go"}
               </text>
               {go.map((line) => (
-                <text fg={api.theme.current.text} wrapMode="none">
-                  {line}
-                </text>
+                <>
+                  <text fg={api.theme.current.textMuted} wrapMode="none">
+                    {line.label ? `${line.label}${" ".repeat(27 - line.label.length)}${line.remaining}` : line.remaining}
+                  </text>
+                  {line.barText ? (
+                    <text fg={line.barColor} wrapMode="none">
+                      {line.barText}
+                    </text>
+                  ) : null}
+                </>
               ))}
 
               {/* OpenCode Zen */}
@@ -272,21 +313,13 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
                 {"\u26A1 OpenCode Zen"}
               </text>
               <text fg={api.theme.current.text} wrapMode="none">
-                {zenInfo}
+                {zen.text}
               </text>
               {zen.barFill > 0 ? (
-                <text fg={zen.color} wrapMode="none">
+                <text fg={zen.barColor} wrapMode="none">
                   {"\u2588".repeat(zen.barFill) + "\u2591".repeat(BAR_W - zen.barFill)}
                 </text>
               ) : null}
-
-              {/* Zen Free */}
-              <text fg={api.theme.current.textMuted} wrapMode="none">
-                {"\u2605 Zen Free Models"}
-              </text>
-              <text fg={api.theme.current.text} wrapMode="none">
-                {free}
-              </text>
             </box>
           );
         },
