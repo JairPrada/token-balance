@@ -40,6 +40,10 @@ function formatCompact(ms: number): string {
   return totalHours >= 1 ? `${totalHours}h` : `${totalMinutes % 60}m`;
 }
 
+function lpad(s: string, w: number): string {
+  return s.length >= w ? s.slice(0, w) : " ".repeat(w - s.length) + s;
+}
+
 function rpad(s: string, w: number): string {
   return s.length >= w ? s.slice(0, w) : s + " ".repeat(w - s.length);
 }
@@ -98,40 +102,41 @@ async function fetchDeepSeek(maxBalance: number): Promise<DeepSeekResult> {
     if (usd?.total_balance) {
       const balance = parseFloat(usd.total_balance);
       const pct = maxBalance > 0 ? Math.round((balance / maxBalance) * 100) : -1;
-      return { text: `Total balance               USD ${balance.toFixed(2)}`, barPercent: pct, barColor: pct >= 0 ? pctColor(pct) : "#808080" };
+      return { text: `${balance.toFixed(2)} USD`, barPercent: pct, barColor: pct >= 0 ? pctColor(pct) : "#808080" };
     }
     return { text: "sin datos", barPercent: -1, barColor: "#808080" };
   } catch { return { text: "error de conexion", barPercent: -1, barColor: "#808080" }; }
 }
 
-interface GoLine { label: string; remaining: string; barText: string; barColor: string }
+interface GoLine { label: string; remaining: string; percent: number; barText: string; barColor: string }
 
 async function fetchOpenCodeGo(): Promise<GoLine[]> {
   const auth = readAuthFile();
   const key = auth?.["opencode-go"]?.key ?? auth?.opencode?.key;
-  if (!key) return [{ label: "", remaining: "sin API key", barText: "", barColor: "#808080" }];
+  if (!key) return [{ label: "", remaining: "sin API key", percent: 0, barText: "", barColor: "#808080" }];
   try {
     const res = await fetch("https://opencode.ai/zen/go/v1/usage", {
       method: "GET",
       headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
       signal: AbortSignal.timeout(10000),
     });
-    if (!res.ok) return [{ label: "", remaining: `error ${res.status}`, barText: "", barColor: "#808080" }];
+    if (!res.ok) return [{ label: "", remaining: `error ${res.status}`, percent: 0, barText: "", barColor: "#808080" }];
     const data = await res.json() as Record<string, unknown>;
     const usage = data?.usage as Record<string, unknown> | undefined;
-    if (!usage) return [{ label: "", remaining: "sin datos", barText: "", barColor: "#808080" }];
+    if (!usage) return [{ label: "", remaining: "sin datos", percent: 0, barText: "", barColor: "#808080" }];
     const lines: GoLine[] = [];
     for (const w of [{ key: "rolling", label: "Five-hour" }, { key: "weekly", label: "Weekly" }, { key: "monthly", label: "Monthly" }]) {
       const win = usage[w.key] as Record<string, unknown> | undefined;
       if (!win || win.status !== "ok") continue;
-      const remaining = 100 - (typeof win.percent === "number" ? win.percent : 0);
+      const used = typeof win.percent === "number" ? win.percent : 0;
+      const remaining = 100 - used;
       const resetsAt = typeof win.resetsAt === "string" ? win.resetsAt : "";
       const resetMs = resetsAt ? Math.max(0, Date.parse(resetsAt) - Date.now()) : 0;
       const bar = barColored(remaining, BAR_W);
-      lines.push({ label: w.label, remaining: formatCompact(resetMs), barText: bar.text, barColor: bar.color });
+      lines.push({ label: w.label, remaining: formatCompact(resetMs), percent: remaining, barText: bar.text, barColor: bar.color });
     }
-    return lines.length > 0 ? lines : [{ label: "", remaining: "sin datos", barText: "", barColor: "#808080" }];
-  } catch { return [{ label: "", remaining: "error de conexion", barText: "", barColor: "#808080" }]; }
+    return lines.length > 0 ? lines : [{ label: "", remaining: "sin datos", percent: 0, barText: "", barColor: "#808080" }];
+  } catch { return [{ label: "", remaining: "error de conexion", percent: 0, barText: "", barColor: "#808080" }]; }
 }
 
 async function fetchOpenCodeZen(): Promise<{ text: string; barFill: number; barColor: string }> {
@@ -225,7 +230,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
 
   const dispose = createRoot((disposeRoot) => {
     const [dsData, setDsData] = createSignal<DeepSeekResult>({ text: "consultando...", barPercent: -1, barColor: "#808080" });
-    const [goData, setGoData] = createSignal<GoLine[]>([{ label: "", remaining: "consultando...", barText: "", barColor: "#808080" }]);
+    const [goData, setGoData] = createSignal<GoLine[]>([{ label: "", remaining: "consultando...", percent: 0, barText: "", barColor: "#808080" }]);
     const [zenData, setZenData] = createSignal<{ text: string; barFill: number; barColor: string }>({ text: "consultando...", barFill: 0, barColor: "#808080" });
     let disposed = false;
 
@@ -262,32 +267,36 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
 
               {open ? (
                 <>
-                  {/* DeepSeek */}
+                  {/* DeepSeek: "7.48 USD" right-aligned, bar + % */}
                   <text fg={api.theme.current.textMuted} wrapMode="none">
                     {"\uD83D\uDC33 DeepSeek"}
                   </text>
                   <text fg={api.theme.current.text} wrapMode="none">{ds.text}</text>
                   {ds.barPercent >= 0 ? (() => {
                     const b = barColored(ds.barPercent, BAR_W);
-                    return <text fg={b.color} wrapMode="none">{`${b.text}   ${ds.barPercent}%`}</text>;
+                    return <text fg={b.color} wrapMode="none">{`${b.text}  ${ds.barPercent}%`}</text>;
                   })() : null}
 
-                  {/* OpenCode Go */}
+                  {/* OpenCode Go: label left, time far right, bar + % */}
                   <text fg={api.theme.current.textMuted} wrapMode="none">
                     {"\uD83D\uDC19 OpenCode Go"}
                   </text>
                   {go.map((line) => (
                     <>
                       <text fg={api.theme.current.textMuted} wrapMode="none">
-                        {line.label ? `${rpad(line.label, 14)}${rpad(line.remaining, 8)}` : rpad(line.remaining, 22)}
+                        {`${rpad(line.label, 14)}${lpad(line.remaining, 8)}`}
                       </text>
-                      {line.barText ? <text fg={line.barColor} wrapMode="none">{line.barText}</text> : null}
+                      {line.barText ? (
+                        <text fg={line.barColor} wrapMode="none">
+                          {`${line.barText}  ${line.percent}%`}
+                        </text>
+                      ) : null}
                     </>
                   ))}
                 </>
               ) : null}
 
-              {/* OpenCode Zen — always visible, never inside Quota */}
+              {/* OpenCode Zen — always visible, NO percentage */}
               <text fg={api.theme.current.textMuted} wrapMode="none">
                 {"\u26A1 OpenCode Zen"}
               </text>
