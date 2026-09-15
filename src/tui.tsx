@@ -49,36 +49,107 @@ function formatTime(ms: number): string {
   return hrs >= 1 ? `${hrs}h` : `${mins % 60}m`;
 }
 
-// ─── Auth ─────────────────────────────────────────────────────────────
+function safeJson<T>(f: string): T | undefined {
+  try { return JSON.parse(fs.readFileSync(f, "utf8")) as T; } catch { return undefined; }
+}
 
-function readAuth(): Record<string, { type?: string; key?: string }> | undefined {
-  try {
-    const home = os.homedir();
-    for (const f of [
-      path.join(home, ".local", "share", "opencode", "auth.json"),
-      path.join(home, "AppData", "Roaming", "opencode", "auth.json"),
-      path.join(home, "AppData", "Local", "opencode", "auth.json"),
-    ]) { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch {} }
-  } catch {}
+// ─── Auth & Config ────────────────────────────────────────────────────
+
+const HOME = os.homedir();
+const CFG_DIR = process.env.OPENCODE_CONFIG_DIR;
+
+function getAuthPaths(): string[] {
+  const p: string[] = [];
+  if (CFG_DIR) p.push(path.join(CFG_DIR, "auth.json"));
+  p.push(
+    path.join(HOME, ".local", "share", "opencode", "auth.json"),
+    path.join(HOME, "Library", "Application Support", "opencode", "auth.json"),
+    path.join(HOME, "AppData", "Roaming", "opencode", "auth.json"),
+    path.join(HOME, "AppData", "Local", "opencode", "auth.json"),
+  );
+  return p;
+}
+
+function getPluginConfigPaths(): string[] {
+  const p: string[] = [];
+  if (CFG_DIR) p.push(path.join(CFG_DIR, "token-balance", "config.json"));
+  p.push(
+    path.join(HOME, ".config", "opencode", "token-balance", "config.json"),
+    path.join(HOME, "Library", "Application Support", "opencode", "token-balance", "config.json"),
+    path.join(HOME, "AppData", "Roaming", "opencode", "token-balance", "config.json"),
+    path.join(HOME, "AppData", "Local", "opencode", "token-balance", "config.json"),
+  );
+  return p;
+}
+
+function getOpencodeConfigPaths(): string[] {
+  const p: string[] = [];
+  if (CFG_DIR) p.push(path.join(CFG_DIR, "opencode.json"));
+  p.push(
+    path.join(HOME, ".config", "opencode", "opencode.json"),
+    path.join(HOME, "Library", "Application Support", "opencode", "opencode.json"),
+    path.join(HOME, "AppData", "Roaming", "opencode", "opencode.json"),
+    path.join(HOME, "AppData", "Local", "opencode", "opencode.json"),
+  );
+  return p;
+}
+
+function readFirst<T>(paths: string[]): T | undefined {
+  for (const f of paths) { const v = safeJson<T>(f); if (v) return v; }
   return undefined;
 }
 
-function readZenCfg(): { workspaceId: string; authCookie: string } | undefined {
-  try {
-    const home = os.homedir();
-    for (const f of [
-      path.join(home, ".config", "opencode", "opencode-quota", "opencode.json"),
-      path.join(home, "AppData", "Roaming", "opencode", "opencode-quota", "opencode.json"),
-      path.join(home, "AppData", "Local", "opencode", "opencode-quota", "opencode.json"),
-    ]) {
-      try {
-        const c = JSON.parse(fs.readFileSync(f, "utf8"));
-        const wid = typeof c?.workspaceId === "string" ? c.workspaceId.trim() : "";
-        const cookie = typeof c?.authCookie === "string" ? c.authCookie.trim() : "";
-        if (wid && cookie) return { workspaceId: wid, authCookie: cookie };
-      } catch {}
+interface AuthEntry { type?: string; key?: string }
+interface PluginConfig {
+  providers?: { deepseek?: boolean; "opencode-go"?: boolean; "opencode-zen"?: boolean };
+  zen?: { workspaceId?: string; authCookie?: string };
+}
+interface OcProvider { apiKey?: string; options?: { apiKey?: string } }
+interface OpencodeConfig { provider?: Record<string, OcProvider>; providers?: Record<string, OcProvider> }
+
+function readAuth(): Record<string, AuthEntry> | undefined {
+  return readFirst<Record<string, AuthEntry>>(getAuthPaths());
+}
+
+function readPluginConfig(): PluginConfig {
+  return readFirst<PluginConfig>(getPluginConfigPaths()) ?? {};
+}
+
+function readOpencodeConfig(): OpencodeConfig | undefined {
+  return readFirst<OpencodeConfig>(getOpencodeConfigPaths());
+}
+
+// ─── Key Resolution (3-tier) ──────────────────────────────────────────
+// Tier 1: env var  →  Tier 2: opencode.json  →  Tier 3: auth.json
+
+function resolveKey(
+  auth: Record<string, AuthEntry> | undefined,
+  providerId: string,
+  envVar: string,
+  fallbackIds?: string[],
+): string | undefined {
+  // Tier 1: environment variable
+  const envVal = process.env[envVar];
+  if (envVal) return envVal;
+
+  // Tier 2: opencode.json / opencode.jsonc
+  const oc = readOpencodeConfig();
+  const pCfg = oc?.provider?.[providerId] ?? oc?.providers?.[providerId];
+  if (pCfg) {
+    let k = pCfg.apiKey ?? pCfg.options?.apiKey;
+    if (k) {
+      const envMatch = k.match(/^\{env:\s*(\w+)\s*\}$/);
+      if (envMatch) k = process.env[envMatch[1]];
+      if (k) return k;
     }
-  } catch {}
+  }
+
+  // Tier 3: auth.json
+  if (auth?.[providerId]?.key) return auth[providerId].key;
+  for (const fid of fallbackIds ?? []) {
+    if (auth?.[fid]?.key) return auth[fid].key;
+  }
+
   return undefined;
 }
 
@@ -88,7 +159,7 @@ interface DS { value: string; pct: number }
 
 async function fetchDS(max: number): Promise<DS> {
   const auth = readAuth();
-  const key = auth?.deepseek?.key;
+  const key = resolveKey(auth, "deepseek", "DEEPSEEK_API_KEY");
   if (!key) return { value: "sin API key", pct: -1 };
   try {
     const r = await fetch("https://api.deepseek.com/user/balance", {
@@ -112,7 +183,7 @@ interface GoLine { label: string; time: string; pct: number }
 
 async function fetchGo(): Promise<GoLine[]> {
   const auth = readAuth();
-  const key = auth?.["opencode-go"]?.key ?? auth?.opencode?.key;
+  const key = resolveKey(auth, "opencode-go", "OPENCODE_API_KEY", ["opencode"]);
   if (!key) return [{ label: "", time: "sin API key", pct: 0 }];
   try {
     const r = await fetch("https://opencode.ai/zen/go/v1/usage", {
@@ -139,15 +210,17 @@ async function fetchGo(): Promise<GoLine[]> {
 }
 
 async function fetchZen(): Promise<boolean> {
-  const cfg = readZenCfg();
-  if (!cfg) return false;
+  const cfg = readPluginConfig();
+  const ws = cfg.zen?.workspaceId?.trim() ?? "";
+  const cookie = cfg.zen?.authCookie?.trim() ?? "";
+  if (!ws || !cookie) return false;
   try {
-    const r = await fetch(`https://opencode.ai/workspace/${encodeURIComponent(cfg.workspaceId)}/billing`, {
+    const r = await fetch(`https://opencode.ai/workspace/${encodeURIComponent(ws)}/billing`, {
       method: "GET",
       headers: {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Gecko/20100101 Firefox/148.0",
         Accept: "text/html",
-        Cookie: `auth=${cfg.authCookie}`,
+        Cookie: `auth=${cookie}`,
       },
       signal: AbortSignal.timeout(10000),
     });
@@ -157,9 +230,20 @@ async function fetchZen(): Promise<boolean> {
 
 // ─── TUI Plugin ───────────────────────────────────────────────────────
 
+const PROVIDER_IDS = ["deepseek", "opencode-go", "opencode-zen"] as const;
+const PROVIDER_NAMES: Record<string, string> = { deepseek: "DeepSeek", "opencode-go": "OpenCode Go", "opencode-zen": "OpenCode Zen" };
+
 const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
   const maxBalance = typeof options?.deepseekMaxBalance === "number" ? options.deepseekMaxBalance : 0;
   const [open, setOpen] = createSignal(api.kv?.get<boolean>("token-balance.quotaOpen", true) ?? true);
+
+  const getEnabled = (): Record<string, boolean> => {
+    const saved = api.kv?.get<Record<string, boolean>>("token-balance.providers");
+    if (saved) return saved;
+    const cfg = readPluginConfig();
+    return cfg.providers ?? { deepseek: true, "opencode-go": true, "opencode-zen": true };
+  };
+  const [enabled, setEnabled] = createSignal<Record<string, boolean>>(getEnabled());
 
   api.keymap?.registerLayer({
     commands: [
@@ -191,6 +275,38 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
                   api.kv?.set("token-balance.deepseekMaxBalance", num);
                   api.ui.toast({ variant: "success", message: `DeepSeek max balance set to $${num.toFixed(2)}` });
                 } else { api.ui.toast({ variant: "error", message: "Invalid amount" }); }
+                api.ui.dialog?.clear();
+              },
+              onCancel() { api.ui.dialog?.clear(); },
+            })
+          );
+        },
+      },
+      {
+        namespace: "palette",
+        name: "token-balance.toggle-provider",
+        title: "Toggle Provider",
+        desc: "Show or hide a provider in the Quota sidebar",
+        category: "Token Balance",
+        slashName: "toggle-provider",
+        run() {
+          const cur = enabled();
+          api.ui?.dialog?.replace?.(() =>
+            api.ui.DialogPrompt({
+              title: "Toggle Provider",
+              description: () => {
+                const list = PROVIDER_IDS.map(k => `${PROVIDER_NAMES[k]}(${cur[k] !== false ? "on" : "off"})`).join("  ");
+                return `${list}  — enter name to toggle`;
+              },
+              placeholder: "deepseek",
+              onConfirm(value: string) {
+                const k = value.trim().toLowerCase();
+                if (PROVIDER_IDS.includes(k as any)) {
+                  const next = { ...cur, [k]: cur[k] === false ? true : false };
+                  setEnabled(next);
+                  api.kv?.set("token-balance.providers", next);
+                  api.ui.toast({ variant: "success", message: `${PROVIDER_NAMES[k]} ${next[k] ? "enabled" : "disabled"}` });
+                } else { api.ui.toast({ variant: "error", message: "Use: deepseek, opencode-go, opencode-zen" }); }
                 api.ui.dialog?.clear();
               },
               onCancel() { api.ui.dialog?.clear(); },
@@ -232,7 +348,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
           const z = zen();
           const isOpen = open();
           const arrow = isOpen ? "\u25BC" : "\u25B6";
-
+          const vis = enabled();
           const t = api.theme.current;
 
           const balanceLine = rpad("Total balance", W - d.value.length) + d.value;
@@ -250,38 +366,50 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
 
               {isOpen ? (
                 <>
-                  <text fg={t.textMuted} wrapMode="none">{"\uD83D\uDC33 DeepSeek"}</text>
-                  <text fg={t.text} wrapMode="none">{balanceLine}</text>
-                  {d.pct >= 0 ? (() => {
-                    const b = makeBar(d.pct);
-                    return (
-                      <text fg={b.color} wrapMode="none">{b.text} {lpad(`${d.pct}%`, BAR_LABEL_W)}</text>
-                    );
-                  })() : null}
-                  <text> </text>
-
-                  <text fg={t.textMuted} wrapMode="none">{"\uD83D\uDC19 OpenCode Go"}</text>
-                  {g.map((line) => (
+                  {vis.deepseek !== false ? (
                     <>
-                      <text fg={t.textMuted} wrapMode="none">
-                        {rpad(line.label, W - line.time.length) + line.time}
-                      </text>
-                      {(() => {
-                        const b = makeBar(line.pct);
+                      <text fg={t.textMuted} wrapMode="none">{"\uD83D\uDC33 DeepSeek"}</text>
+                      <text fg={t.text} wrapMode="none">{balanceLine}</text>
+                      {d.pct >= 0 ? (() => {
+                        const b = makeBar(d.pct);
                         return (
-                          <text fg={b.color} wrapMode="none">{b.text} {lpad(`${line.pct}% left`, BAR_LABEL_W)}</text>
+                          <text fg={b.color} wrapMode="none">{b.text} {lpad(`${d.pct}%`, BAR_LABEL_W)}</text>
                         );
-                      })()}
+                      })() : null}
+                      <text> </text>
                     </>
-                  ))}
-                  <text> </text>
+                  ) : null}
 
-                  <text fg={t.textMuted} wrapMode="none">{"\u26A1 OpenCode Zen"}</text>
-                  <text fg={t.textMuted} wrapMode="none">
-                    {z ? rpad("Disponibles", W - 5) + "ahora" : "sin datos"}
-                  </text>
-                  {z ? (
-                    <text fg="#98c379" wrapMode="none">{"\u2588".repeat(BAR)}</text>
+                  {vis["opencode-go"] !== false ? (
+                    <>
+                      <text fg={t.textMuted} wrapMode="none">{"\uD83D\uDC19 OpenCode Go"}</text>
+                      {g.map((line) => (
+                        <>
+                          <text fg={t.textMuted} wrapMode="none">
+                            {rpad(line.label, W - line.time.length) + line.time}
+                          </text>
+                          {(() => {
+                            const b = makeBar(line.pct);
+                            return (
+                              <text fg={b.color} wrapMode="none">{b.text} {lpad(`${line.pct}% left`, BAR_LABEL_W)}</text>
+                            );
+                          })()}
+                        </>
+                      ))}
+                      <text> </text>
+                    </>
+                  ) : null}
+
+                  {vis["opencode-zen"] !== false ? (
+                    <>
+                      <text fg={t.textMuted} wrapMode="none">{"\u26A1 OpenCode Zen"}</text>
+                      <text fg={t.textMuted} wrapMode="none">
+                        {z ? rpad("Disponibles", W - 5) + "ahora" : "sin configurar"}
+                      </text>
+                      {z ? (
+                        <text fg="#98c379" wrapMode="none">{"\u2588".repeat(BAR)}</text>
+                      ) : null}
+                    </>
                   ) : null}
                 </>
               ) : null}
