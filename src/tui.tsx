@@ -291,7 +291,7 @@ function runSetupWizard(api: TuiPluginApi) {
   api.ui?.dialog?.replace?.(() =>
     api.ui.DialogPrompt({
       title: "Token Balance — Setup",
-      description: () => `Current status:\n\n${status}\n\nPress Enter to start setup, or Esc to cancel.`,
+      description: () => <text fg={api.theme.current.textMuted} wrapMode="word">{`Current status:\n\n${status}\n\nPress Enter to start setup, or Esc to cancel.`}</text>,
       placeholder: "",
       onConfirm() {
         if (!deepseekKey) return promptDeepSeek(api, cfg, auth);
@@ -308,7 +308,7 @@ function promptDeepSeek(api: TuiPluginApi, cfg: PluginConfig, auth: Record<strin
   api.ui?.dialog?.replace?.(() =>
     api.ui.DialogPrompt({
       title: "Step 1 — DeepSeek API Key",
-      description: () => "Enter your DeepSeek API key.\nGet it at: platform.deepseek.com → API Keys\n\nOr press Enter to skip.",
+      description: () => <text fg={api.theme.current.textMuted} wrapMode="word">{"Enter your DeepSeek API key.\nGet it at: platform.deepseek.com → API Keys\n\nOr press Enter to skip."}</text>,
       placeholder: "sk-...",
       onConfirm(value) {
         const k = value.trim();
@@ -327,14 +327,13 @@ function promptDeepSeek(api: TuiPluginApi, cfg: PluginConfig, auth: Record<strin
 function promptGo(api: TuiPluginApi, cfg: PluginConfig, auth: Record<string, AuthEntry> | undefined) {
   const alreadyHas = !!resolveKey(auth, "opencode-go", "OPENCODE_API_KEY", ["opencode"]);
   if (alreadyHas) {
-    // If user has key from env/opencode.json/auth.json, skip to Zen
     if (!cfg.zen?.authCookie) return promptZenCookie(api, cfg);
     return showSetupDone(api);
   }
   api.ui?.dialog?.replace?.(() =>
     api.ui.DialogPrompt({
       title: "Step 2 — OpenCode Go API Key",
-      description: () => "Enter your OpenCode Go API key.\nIf you use OPENCODE_API_KEY env var, press Enter to skip.",
+      description: () => <text fg={api.theme.current.textMuted} wrapMode="word">{"Enter your OpenCode Go API key.\nIf you use OPENCODE_API_KEY env var, press Enter to skip."}</text>,
       placeholder: "your-opencode-go-key",
       onConfirm(value) {
         const k = value.trim();
@@ -355,17 +354,7 @@ function promptZenCookie(api: TuiPluginApi, cfg: PluginConfig) {
   api.ui?.dialog?.replace?.(() =>
     api.ui.DialogPrompt({
       title: "Step 3 — OpenCode Zen Cookie",
-      description: () => [
-        "To get your Zen cookie:",
-        "",
-        "1. Open opencode.ai in your browser",
-        "2. Log in to your account",
-        "3. Press F12 → Application → Cookies",
-        "4. Find the 'auth' cookie for opencode.ai",
-        "5. Copy its value and paste it below",
-        "",
-        "Press Enter to skip Zen setup.",
-      ].join("\n"),
+      description: () => <text fg={api.theme.current.textMuted} wrapMode="word">{"To get your Zen cookie:\n\n1. Open opencode.ai in your browser\n2. Log in to your account\n3. Press F12 → Application → Cookies\n4. Find the 'auth' cookie for opencode.ai\n5. Copy its value and paste it below\n\nPress Enter to skip Zen setup."}</text>,
       placeholder: "paste auth cookie value here",
       onConfirm(value) {
         const c = value.trim();
@@ -386,14 +375,7 @@ function promptZenWorkspace(api: TuiPluginApi, cfg: PluginConfig) {
   api.ui?.dialog?.replace?.(() =>
     api.ui.DialogPrompt({
       title: "Step 4 — Workspace ID",
-      description: () => [
-        "Enter your OpenCode workspace ID.",
-        "",
-        "Find it in the URL when you open opencode.ai:",
-        "  opencode.ai/workspace/wrk_XXXXX/...",
-        "",
-        "Paste the workspace ID below.",
-      ].join("\n"),
+      description: () => <text fg={api.theme.current.textMuted} wrapMode="word">{"Enter your OpenCode workspace ID.\n\nFind it in the URL when you open opencode.ai:\n  opencode.ai/workspace/wrk_XXXXX/...\n\nPaste the workspace ID below."}</text>,
       placeholder: "wrk_...",
       onConfirm(value) {
         const w = value.trim();
@@ -422,7 +404,7 @@ function showSetupDone(api: TuiPluginApi) {
   api.ui?.dialog?.replace?.(() =>
     api.ui.DialogPrompt({
       title: "Token Balance — Done",
-      description: () => lines.join("\n"),
+      description: () => <text fg={api.theme.current.textMuted} wrapMode="word">{lines.join("\n")}</text>,
       placeholder: "",
       onConfirm() { api.ui.dialog?.clear(); },
       onCancel() { api.ui.dialog?.clear(); },
