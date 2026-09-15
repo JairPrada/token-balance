@@ -164,7 +164,7 @@ async function fetchOpenCodeZen(): Promise<{ text: string; barFill: number; barC
     if (balance <= 0) return { text: "sin datos", barFill: 0, barColor: "#808080" };
     if (monthlyLimit !== null && monthlyUsage !== null && monthlyLimit > 0) {
       const pct = Math.round((Math.max(0, monthlyLimit - monthlyUsage) / monthlyLimit) * 100);
-      return { text: `Balance                USD ${balance.toFixed(2)}`, barFill: Math.round((pct / 100) * BAR_W), barColor: pctColor(pct) };
+      return { text: `Disponibles                    ahora`, barFill: Math.round((pct / 100) * BAR_W), barColor: pctColor(pct) };
     }
     return { text: `Balance                USD ${balance.toFixed(2)}`, barFill: 0, barColor: "#808080" };
   } catch { return { text: "error de conexion", barFill: 0, barColor: "#808080" }; }
@@ -176,7 +176,6 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
   const maxBalance = typeof options?.deepseekMaxBalance === "number" ? options.deepseekMaxBalance : 0;
   const [quotaOpen, setQuotaOpen] = createSignal(api.kv?.get<boolean>("token-balance.quotaOpen", true) ?? true);
 
-  // Toggle command
   api.keymap?.registerLayer({
     commands: [
       {
@@ -240,34 +239,6 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
     void refresh();
     const ticker = setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
 
-    // Go line: label on left, time right-aligned in 8-char field
-    const goLine = (line: GoLine) => (
-      <>
-        <text fg={api.theme.current.textMuted} wrapMode="none">
-          {line.label ? `${rpad(line.label, 14)}${rpad(line.remaining, 8)}` : rpad(line.remaining, 22)}
-        </text>
-        {line.barText ? <text fg={line.barColor} wrapMode="none">{line.barText}</text> : null}
-      </>
-    );
-
-    // Zen section (shared between inside Quota and standalone)
-    const zenSection = () => {
-      const zen = zenData();
-      return (
-        <>
-          <text fg={api.theme.current.textMuted} wrapMode="none">
-            {"\u26A1 OpenCode Zen"}
-          </text>
-          <text fg={api.theme.current.text} wrapMode="none">{zen.text}</text>
-          {zen.barFill > 0 ? (
-            <text fg={zen.barColor} wrapMode="none">
-              {"\u2588".repeat(zen.barFill) + "\u2591".repeat(BAR_W - zen.barFill)}
-            </text>
-          ) : null}
-        </>
-      );
-    };
-
     api.slots.register({
       order: 151,
       slots: {
@@ -305,12 +276,27 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
                   <text fg={api.theme.current.textMuted} wrapMode="none">
                     {"\uD83D\uDC19 OpenCode Go"}
                   </text>
-                  {go.map((line) => goLine(line))}
+                  {go.map((line) => (
+                    <>
+                      <text fg={api.theme.current.textMuted} wrapMode="none">
+                        {line.label ? `${rpad(line.label, 14)}${rpad(line.remaining, 8)}` : rpad(line.remaining, 22)}
+                      </text>
+                      {line.barText ? <text fg={line.barColor} wrapMode="none">{line.barText}</text> : null}
+                    </>
+                  ))}
                 </>
               ) : null}
 
-              {/* Zen always visible (outside Quota collapse) */}
-              {zenSection()}
+              {/* OpenCode Zen — always visible, never inside Quota */}
+              <text fg={api.theme.current.textMuted} wrapMode="none">
+                {"\u26A1 OpenCode Zen"}
+              </text>
+              <text fg={api.theme.current.text} wrapMode="none">{zen.text}</text>
+              {zen.barFill > 0 ? (
+                <text fg={zen.barColor} wrapMode="none">
+                  {"\u2588".repeat(zen.barFill) + "\u2591".repeat(BAR_W - zen.barFill)}
+                </text>
+              ) : null}
             </box>
           );
         },
