@@ -7,16 +7,15 @@ import path from "node:path";
 
 const id = "@openplugins/token-balance";
 
-// Sidebar: 42 total, paddingLeft=2, paddingRight=2 → 38 usable, right pad 3 → 35
-const W = 35;
-const BAR = 26;
-const BAR_LABEL_W = W - BAR - 1;
+// Sidebar: 42 total, paddingLeft=2, paddingRight=2 → 38 usable
+const W = 38;
+const BAR = 33; // 38 - 2(space) - 3(pct)
 const REFRESH_MS = 60_000;
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
 function pctColor(pct: number): string {
-  if (pct >= 60) return "#98c379";
+  if (pct >= 60) return "#50fa7b";
   if (pct >= 30) return "#f1fa8c";
   return "#ff5555";
 }
@@ -30,11 +29,6 @@ function makeBar(pct: number): { text: string; color: string } {
 function rpad(s: string, w: number): string {
   if (s.length >= w) return s.slice(0, w);
   return s + " ".repeat(w - s.length);
-}
-
-function lpad(s: string, w: number): string {
-  if (s.length >= w) return s.slice(0, w);
-  return " ".repeat(w - s.length) + s;
 }
 
 function formatTime(ms: number): string {
@@ -84,46 +78,46 @@ function readZenCfg(): { workspaceId: string; authCookie: string } | undefined {
 
 // ─── Fetchers ─────────────────────────────────────────────────────────
 
-interface DS { value: string; pct: number }
+interface DS { value: string; pct: number; error: string | null }
 
 async function fetchDS(max: number): Promise<DS> {
   const auth = readAuth();
   const key = auth?.deepseek?.key;
-  if (!key) return { value: "sin API key", pct: -1 };
+  if (!key) return { value: "", pct: -1, error: "Configura auth.json \u2192 deepseek.key" };
   try {
     const r = await fetch("https://api.deepseek.com/user/balance", {
       method: "GET",
       headers: { Authorization: `Bearer ${key}`, "User-Agent": "token-balance/1.0" },
       signal: AbortSignal.timeout(10000),
     });
-    if (!r.ok) return { value: `error ${r.status}`, pct: -1 };
+    if (!r.ok) return { value: "", pct: -1, error: `Error ${r.status} — verifica tu API key` };
     const d = await r.json() as Record<string, unknown>;
     const infos = Array.isArray(d.balance_infos) ? d.balance_infos : [];
     const usd = infos.find((i: any) => i.currency === "USD") ?? infos[0];
     if (usd?.total_balance) {
       const bal = parseFloat(usd.total_balance);
-      return { value: `USD ${bal.toFixed(2)}`, pct: max > 0 ? Math.round((bal / max) * 100) : -1 };
+      return { value: `${bal.toFixed(2)} USD`, pct: max > 0 ? Math.round((bal / max) * 100) : -1, error: null };
     }
-    return { value: "sin datos", pct: -1 };
-  } catch { return { value: "error de conexion", pct: -1 }; }
+    return { value: "", pct: -1, error: "Sin datos — intenta de nuevo" };
+  } catch { return { value: "", pct: -1, error: "Error de conexion" }; }
 }
 
-interface GoLine { label: string; time: string; pct: number }
+interface GoLine { label: string; time: string; pct: number; error: string | null }
 
 async function fetchGo(): Promise<GoLine[]> {
   const auth = readAuth();
   const key = auth?.["opencode-go"]?.key ?? auth?.opencode?.key;
-  if (!key) return [{ label: "", time: "sin API key", pct: 0 }];
+  if (!key) return [{ label: "", time: "", pct: 0, error: "Configura auth.json \u2192 opencode-go.key" }];
   try {
     const r = await fetch("https://opencode.ai/zen/go/v1/usage", {
       method: "GET",
       headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
       signal: AbortSignal.timeout(10000),
     });
-    if (!r.ok) return [{ label: "", time: `error ${r.status}`, pct: 0 }];
+    if (!r.ok) return [{ label: "", time: "", pct: 0, error: `Error ${r.status} — verifica tu API key` }];
     const d = await r.json() as Record<string, unknown>;
     const u = d?.usage as Record<string, unknown> | undefined;
-    if (!u) return [{ label: "", time: "sin datos", pct: 0 }];
+    if (!u) return [{ label: "", time: "", pct: 0, error: "Sin datos" }];
     const lines: GoLine[] = [];
     for (const w of [{ key: "rolling", label: "Five-hour" }, { key: "weekly", label: "Weekly" }, { key: "monthly", label: "Monthly" }]) {
       const win = u[w.key] as Record<string, unknown> | undefined;
@@ -132,15 +126,17 @@ async function fetchGo(): Promise<GoLine[]> {
       const rem = 100 - used;
       const resetsAt = typeof win.resetsAt === "string" ? win.resetsAt : "";
       const ms = resetsAt ? Math.max(0, Date.parse(resetsAt) - Date.now()) : 0;
-      lines.push({ label: w.label, time: formatTime(ms), pct: rem });
+      lines.push({ label: w.label, time: formatTime(ms), pct: rem, error: null });
     }
-    return lines.length > 0 ? lines : [{ label: "", time: "sin datos", pct: 0 }];
-  } catch { return [{ label: "", time: "error de conexion", pct: 0 }]; }
+    return lines.length > 0 ? lines : [{ label: "", time: "", pct: 0, error: "Sin datos" }];
+  } catch { return [{ label: "", time: "", pct: 0, error: "Error de conexion" }]; }
 }
 
-async function fetchZen(): Promise<boolean> {
+interface ZenResult { fill: number; color: string; error: string | null; timeText: string }
+
+async function fetchZen(): Promise<ZenResult> {
   const cfg = readZenCfg();
-  if (!cfg) return false;
+  if (!cfg) return { fill: 0, color: "#808080", error: "Configura opencode-quota/opencode.json", timeText: "" };
   try {
     const r = await fetch(`https://opencode.ai/workspace/${encodeURIComponent(cfg.workspaceId)}/billing`, {
       method: "GET",
@@ -151,8 +147,26 @@ async function fetchZen(): Promise<boolean> {
       },
       signal: AbortSignal.timeout(10000),
     });
-    return r.ok;
-  } catch { return false; }
+    if (r.status === 401 || r.status === 403) return { fill: 0, color: "#808080", error: "Cookie expirada — ejecuta /zen-free", timeText: "" };
+    if (!r.ok) return { fill: 0, color: "#808080", error: `Error ${r.status}`, timeText: "" };
+    const html = await r.text();
+    const U = 100_000_000;
+    let balance = 0, mLimit: number | null = null, mUsage: number | null = null;
+    const re = /\b(balance|monthlyLimit|monthlyUsage)\s*:\s*(\d+(?:\.\d+)?)\b/g;
+    const f: Record<string, number> = {};
+    for (const m of html.matchAll(re)) f[m[1]] = Number(m[2]);
+    if (Number.isFinite(f.balance) && f.balance >= 0) {
+      balance = f.balance / U;
+      mLimit = Number.isFinite(f.monthlyLimit) && f.monthlyLimit >= 0 ? f.monthlyLimit : null;
+      mUsage = Number.isFinite(f.monthlyUsage) && f.monthlyUsage >= 0 ? f.monthlyUsage / U : null;
+    }
+    if (balance <= 0) return { fill: 0, color: "#808080", error: "Sin datos", timeText: "" };
+    if (mLimit !== null && mUsage !== null && mLimit > 0) {
+      const pct = Math.round((Math.max(0, mLimit - mUsage) / mLimit) * 100);
+      return { fill: Math.round((pct / 100) * BAR), color: pctColor(pct), error: null, timeText: "ahora" };
+    }
+    return { fill: 0, color: "#808080", error: null, timeText: "" };
+  } catch { return { fill: 0, color: "#808080", error: "Error de conexion", timeText: "" }; }
 }
 
 // ─── TUI Plugin ───────────────────────────────────────────────────────
@@ -209,9 +223,9 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
   };
 
   const dispose = createRoot((root) => {
-    const [ds, setDs] = createSignal<DS>({ value: "consultando...", pct: -1 });
-    const [go, setGo] = createSignal<GoLine[]>([{ label: "", time: "consultando...", pct: 0 }]);
-    const [zen, setZen] = createSignal<boolean>(false);
+    const [ds, setDs] = createSignal<DS>({ value: "", pct: -1, error: "Cargando..." });
+    const [go, setGo] = createSignal<GoLine[]>([{ label: "", time: "", pct: 0, error: "Cargando..." }]);
+    const [zen, setZen] = createSignal<ZenResult>({ fill: 0, color: "#808080", error: "Cargando...", timeText: "" });
     let dead = false;
 
     const refresh = async () => {
@@ -233,58 +247,82 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
           const isOpen = open();
           const arrow = isOpen ? "\u25BC" : "\u25B6";
 
-          const t = api.theme.current;
-
-          const balanceLine = rpad("Total balance", W - d.value.length) + d.value;
-
           return (
-            <box gap={0}>
+            <box gap={0} paddingLeft={1}>
               <text
-                fg={t.textMuted}
+                fg={api.theme.current.textMuted}
                 wrapMode="none"
                 onMouseDown={() => { const v = !open(); setOpen(v); api.kv?.set("token-balance.quotaOpen", v); }}
               >
-                {`${arrow} Quota`}
+                {`Quota ${arrow}`}
               </text>
               <text> </text>
 
               {isOpen ? (
                 <>
-                  <text fg={t.textMuted} wrapMode="none">{"\uD83D\uDC33 DeepSeek"}</text>
-                  <text fg={t.text} wrapMode="none">{balanceLine}</text>
-                  {d.pct >= 0 ? (() => {
-                    const b = makeBar(d.pct);
-                    return (
-                      <text fg={b.color} wrapMode="none">{b.text} {lpad(`${d.pct}%`, BAR_LABEL_W)}</text>
-                    );
-                  })() : null}
+                  <text fg={api.theme.current.textMuted} wrapMode="none">{"\uD83D\uDC33 DeepSeek"}</text>
+                  {d.error ? (
+                    <text fg="#ff5555" wrapMode="none">{d.error}</text>
+                  ) : (
+                    <>
+                      <text fg={api.theme.current.text} wrapMode="none">
+                        {rpad("Credits", W - d.value.length) + d.value}
+                      </text>
+                      {d.pct >= 0 ? (() => {
+                        const b = makeBar(d.pct);
+                        return (
+                          <text wrapMode="none">
+                            <text fg={b.color}>{b.text}</text>
+                            <text fg={b.color}>  {d.pct}%</text>
+                          </text>
+                        );
+                      })() : null}
+                    </>
+                  )}
                   <text> </text>
 
-                  <text fg={t.textMuted} wrapMode="none">{"\uD83D\uDC19 OpenCode Go"}</text>
+                  <text fg={api.theme.current.textMuted} wrapMode="none">{"\uD83D\uDC19 OpenCode Go"}</text>
                   {g.map((line) => (
                     <>
-                      <text fg={t.textMuted} wrapMode="none">
-                        {rpad(line.label, W - line.time.length) + line.time}
-                      </text>
-                      {(() => {
-                        const b = makeBar(line.pct);
-                        return (
-                          <text fg={b.color} wrapMode="none">{b.text} {lpad(`${line.pct}% left`, BAR_LABEL_W)}</text>
-                        );
-                      })()}
+                      {line.error ? (
+                        <text fg="#ff5555" wrapMode="none">{line.error}</text>
+                      ) : (
+                        <>
+                          <text fg={api.theme.current.textMuted} wrapMode="none">
+                            {rpad(line.label, W - line.time.length) + line.time}
+                          </text>
+                          {(() => {
+                            const b = makeBar(line.pct);
+                            return (
+                              <text wrapMode="none">
+                                <text fg={b.color}>{b.text}</text>
+                                <text fg={b.color}>  {line.pct}%</text>
+                              </text>
+                            );
+                          })()}
+                        </>
+                      )}
                     </>
                   ))}
                   <text> </text>
-
-                  <text fg={t.textMuted} wrapMode="none">{"\u26A1 OpenCode Zen"}</text>
-                  <text fg={t.textMuted} wrapMode="none">
-                    {z ? rpad("Disponibles", W - 5) + "ahora" : "sin datos"}
-                  </text>
-                  {z ? (
-                    <text fg="#98c379" wrapMode="none">{"\u2588".repeat(BAR)}</text>
-                  ) : null}
                 </>
               ) : null}
+
+              <text fg={api.theme.current.textMuted} wrapMode="none">{"\u26A1 OpenCode Zen"}</text>
+              {z.error ? (
+                <text fg="#ff5555" wrapMode="none">{z.error}</text>
+              ) : z.fill > 0 ? (
+                <>
+                  <text fg={api.theme.current.text} wrapMode="none">
+                    {rpad("Disponibles", W - z.timeText.length) + z.timeText}
+                  </text>
+                  <text fg={z.color} wrapMode="none">
+                    {"\u2588".repeat(z.fill) + "\u2591".repeat(BAR - z.fill)}
+                  </text>
+                </>
+              ) : (
+                <text fg={api.theme.current.textMuted} wrapMode="none">Sin datos</text>
+              )}
             </box>
           );
         },
