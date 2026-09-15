@@ -16,5 +16,9 @@ export default defineConfig([
       "@opentui/solid",
       "solid-js",
     ],
+    esbuildOptions(options) {
+      options.jsx = "automatic";
+      options.jsxImportSource = "@opentui/solid";
+    },
   },
 ]);
