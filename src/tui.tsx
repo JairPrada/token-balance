@@ -12,9 +12,9 @@ const REFRESH_INTERVAL_MS = 60_000;
 // ─── Color helpers ────────────────────────────────────────────────────
 
 function pctColor(pct: number): string {
-  if (pct >= 60) return "#50fa7b";  // green
-  if (pct >= 30) return "#f1fa8c";  // yellow
-  return "#ff5555";                  // red
+  if (pct >= 60) return "#50fa7b";
+  if (pct >= 30) return "#f1fa8c";
+  return "#ff5555";
 }
 
 function barColored(percent: number, width: number): { text: string; color: string } {
@@ -27,7 +27,28 @@ function barColored(percent: number, width: number): { text: string; color: stri
   };
 }
 
-// ─── Auth helpers (sync, same pattern as zen-free-panel.tsx) ───────────
+// ─── Formatting ───────────────────────────────────────────────────────
+
+function formatCompact(ms: number): string {
+  if (ms <= 0) return "ahora";
+  const totalMinutes = Math.ceil(ms / 60000);
+  const totalHours = Math.floor(totalMinutes / 60);
+  if (totalHours >= 24) {
+    const days = Math.floor(totalHours / 24);
+    const remainH = totalHours % 24;
+    return remainH > 0 ? `${days}d ${remainH}h` : `${days}d`;
+  }
+  const hours = totalHours;
+  const minutes = totalMinutes % 60;
+  return hours >= 1 ? `${hours}h` : `${minutes}m`;
+}
+
+/** Right-pad a string to a fixed width */
+function rpad(s: string, w: number): string {
+  return s.length >= w ? s.slice(0, w) : s + " ".repeat(w - s.length);
+}
+
+// ─── Auth helpers (sync) ──────────────────────────────────────────────
 
 function readAuthFile(): Record<string, { type?: string; key?: string }> | undefined {
   try {
@@ -38,7 +59,7 @@ function readAuthFile(): Record<string, { type?: string; key?: string }> | undef
       path.join(home, "AppData", "Local", "opencode", "auth.json"),
     ];
     for (const file of candidates) {
-      try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { /* try next */ }
+      try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { /* next */ }
     }
   } catch { /* ignore */ }
   return undefined;
@@ -58,27 +79,17 @@ function readZenConfig(): { workspaceId: string; authCookie: string } | undefine
         const workspaceId = typeof config?.workspaceId === "string" ? config.workspaceId.trim() : "";
         const authCookie = typeof config?.authCookie === "string" ? config.authCookie.trim() : "";
         if (workspaceId && authCookie) return { workspaceId, authCookie };
-      } catch { /* try next */ }
+      } catch { /* next */ }
     }
   } catch { /* ignore */ }
   return undefined;
-}
-
-// ─── Formatting ───────────────────────────────────────────────────────
-
-function formatCompact(ms: number): string {
-  if (ms <= 0) return "ahora";
-  const totalMinutes = Math.ceil(ms / 60000);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return hours >= 1 ? `${hours}h` : `${minutes}m`;
 }
 
 // ─── Provider fetchers ────────────────────────────────────────────────
 
 interface DeepSeekResult {
   text: string;
-  barPercent: number;  // -1 = no bar
+  barPercent: number;
   barColor: string;
 }
 
@@ -86,7 +97,6 @@ async function fetchDeepSeek(maxBalance: number): Promise<DeepSeekResult> {
   const auth = readAuthFile();
   const key = auth?.deepseek?.key;
   if (!key) return { text: "sin API key", barPercent: -1, barColor: "#808080" };
-
   try {
     const res = await fetch("https://api.deepseek.com/user/balance", {
       method: "GET",
@@ -121,7 +131,6 @@ async function fetchOpenCodeGo(): Promise<GoLine[]> {
   const auth = readAuthFile();
   const key = auth?.["opencode-go"]?.key ?? auth?.opencode?.key;
   if (!key) return [{ label: "", remaining: "sin API key", barText: "", barColor: "#808080" }];
-
   try {
     const res = await fetch("https://opencode.ai/zen/go/v1/usage", {
       method: "GET",
@@ -157,7 +166,6 @@ async function fetchOpenCodeGo(): Promise<GoLine[]> {
 async function fetchOpenCodeZen(): Promise<{ text: string; barFill: number; barColor: string }> {
   const config = readZenConfig();
   if (!config) return { text: "sin config", barFill: 0, barColor: "#808080" };
-
   try {
     const url = `https://opencode.ai/workspace/${encodeURIComponent(config.workspaceId)}/billing`;
     const res = await fetch(url, {
@@ -171,12 +179,10 @@ async function fetchOpenCodeZen(): Promise<{ text: string; barFill: number; barC
     });
     if (!res.ok) return { text: `error ${res.status}`, barFill: 0, barColor: "#808080" };
     const html = await res.text();
-
     const BILLING_UNITS = 100_000_000;
     let balance = 0;
     let monthlyLimit: number | null = null;
     let monthlyUsage: number | null = null;
-
     const ssrRe = /\b(balance|monthlyLimit|monthlyUsage)\s*:\s*(\d+(?:\.\d+)?)\b/g;
     const fields: Record<string, number> = {};
     for (const m of html.matchAll(ssrRe)) fields[m[1]] = Number(m[2]);
@@ -185,9 +191,7 @@ async function fetchOpenCodeZen(): Promise<{ text: string; barFill: number; barC
       monthlyLimit = Number.isFinite(fields.monthlyLimit) && fields.monthlyLimit >= 0 ? fields.monthlyLimit : null;
       monthlyUsage = Number.isFinite(fields.monthlyUsage) && fields.monthlyUsage >= 0 ? fields.monthlyUsage / BILLING_UNITS : null;
     }
-
     if (balance <= 0) return { text: "sin datos", barFill: 0, barColor: "#808080" };
-
     if (monthlyLimit !== null && monthlyUsage !== null && monthlyLimit > 0) {
       const remaining = Math.max(0, monthlyLimit - monthlyUsage);
       const pct = Math.round((remaining / monthlyLimit) * 100);
@@ -201,10 +205,12 @@ async function fetchOpenCodeZen(): Promise<{ text: string; barFill: number; barC
 // ─── TUI Plugin ───────────────────────────────────────────────────────
 
 const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
-  // Plugin option: deepseekMaxBalance (total USD loaded)
   const maxBalance = typeof options?.deepseekMaxBalance === "number" ? options.deepseekMaxBalance : 0;
 
-  // Register /set-max-balance command
+  // Collapsed state
+  const [collapsed, setCollapsed] = createSignal(api.kv?.get<boolean>("token-balance.collapsed", false) ?? false);
+
+  // Register commands
   api.keymap?.registerLayer({
     commands: [
       {
@@ -235,11 +241,23 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
           );
         },
       },
+      {
+        namespace: "palette",
+        name: "token-balance.toggle",
+        title: "Toggle Quota Panel",
+        desc: "Collapse/expand the Quota sidebar panel",
+        category: "Token Balance",
+        slashName: "quota-toggle",
+        run() {
+          const next = !collapsed();
+          setCollapsed(next);
+          api.kv?.set("token-balance.collapsed", next);
+        },
+      },
     ],
     bindings: [],
   });
 
-  // Read maxBalance from kv if not set via options
   const getMaxBalance = () => {
     if (maxBalance > 0) return maxBalance;
     const kv = api.kv?.get<number>("token-balance.deepseekMaxBalance", 0);
@@ -276,49 +294,60 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
           const ds = dsData();
           const go = goData();
           const zen = zenData();
+          const isCollapsed = collapsed();
+          const arrow = isCollapsed ? "\u25B6" : "\u25BC";  // ▶ / ▼
 
           return (
             <box gap={0}>
-              {/* DeepSeek */}
-              <text fg={api.theme.current.textMuted} wrapMode="none">
-                {"\uD83D\uDC33 DeepSeek"}
+              {/* Quota title (collapsible) */}
+              <text fg={api.theme.current.accent} wrapMode="none">
+                {`Quota ${arrow}`}
               </text>
-              <text fg={api.theme.current.text} wrapMode="none">
-                {ds.text}
-              </text>
-              {ds.barPercent >= 0 ? (() => {
-                const b = barColored(ds.barPercent, BAR_W);
-                return <text fg={b.color} wrapMode="none">{b.text}   {ds.barPercent}%</text>;
-              })() : null}
 
-              {/* OpenCode Go */}
-              <text fg={api.theme.current.textMuted} wrapMode="none">
-                {"\uD83D\uDC19 OpenCode Go"}
-              </text>
-              {go.map((line) => (
+              {!isCollapsed ? (
                 <>
+                  {/* DeepSeek */}
                   <text fg={api.theme.current.textMuted} wrapMode="none">
-                    {line.label ? `${line.label}${" ".repeat(27 - line.label.length)}${line.remaining}` : line.remaining}
+                    {"  \uD83D\uDC33 DeepSeek"}
                   </text>
-                  {line.barText ? (
-                    <text fg={line.barColor} wrapMode="none">
-                      {line.barText}
+                  <text fg={api.theme.current.text} wrapMode="none">
+                    {`  ${ds.text}`}
+                  </text>
+                  {ds.barPercent >= 0 ? (() => {
+                    const b = barColored(ds.barPercent, BAR_W);
+                    return <text fg={b.color} wrapMode="none">{`  ${b.text}   ${ds.barPercent}%`}</text>;
+                  })() : null}
+
+                  {/* OpenCode Go */}
+                  <text fg={api.theme.current.textMuted} wrapMode="none">
+                    {"  \uD83D\uDC19 OpenCode Go"}
+                  </text>
+                  {go.map((line) => (
+                    <>
+                      <text fg={api.theme.current.textMuted} wrapMode="none">
+                        {`  ${line.label ? rpad(line.label, 14) + rpad(line.remaining, 8) : line.remaining}`}
+                      </text>
+                      {line.barText ? (
+                        <text fg={line.barColor} wrapMode="none">
+                          {`  ${line.barText}`}
+                        </text>
+                      ) : null}
+                    </>
+                  ))}
+
+                  {/* OpenCode Zen */}
+                  <text fg={api.theme.current.textMuted} wrapMode="none">
+                    {"  \u26A1 OpenCode Zen"}
+                  </text>
+                  <text fg={api.theme.current.text} wrapMode="none">
+                    {`  ${zen.text}`}
+                  </text>
+                  {zen.barFill > 0 ? (
+                    <text fg={zen.barColor} wrapMode="none">
+                      {`  ${"\u2588".repeat(zen.barFill) + "\u2591".repeat(BAR_W - zen.barFill)}`}
                     </text>
                   ) : null}
                 </>
-              ))}
-
-              {/* OpenCode Zen */}
-              <text fg={api.theme.current.textMuted} wrapMode="none">
-                {"\u26A1 OpenCode Zen"}
-              </text>
-              <text fg={api.theme.current.text} wrapMode="none">
-                {zen.text}
-              </text>
-              {zen.barFill > 0 ? (
-                <text fg={zen.barColor} wrapMode="none">
-                  {"\u2588".repeat(zen.barFill) + "\u2591".repeat(BAR_W - zen.barFill)}
-                </text>
               ) : null}
             </box>
           );
