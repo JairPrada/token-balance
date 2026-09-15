@@ -16,23 +16,23 @@ OpenCode sidebar plugin that displays token balances and quotas for DeepSeek, Op
 ## Preview
 
 ```
-Quota ▼
+▼ Quota
 
 🐳 DeepSeek
-Credits                       7.48 USD
-████████████████████████████████  94%
+Total balance               USD 7.48
+████████████████████████████  94%
 
 🐙 OpenCode Go
-Five-hour                     1h
-████████████████████████████████  97%
-Weekly                     5d 7h
-█████████████████████████████░░░  90%
-Monthly                   27d 9h
-████████████████████████████████  94%
+Five-hour                    1h
+██████████████████████████░   97% left
+Weekly                    5d 7h
+██████████████████████░░░░   90% left
+Monthly                  27d 9h
+████████████████████████░░   94% left
 
 ⚡ OpenCode Zen
-Disponibles                    agora
-████████████████████████████████████
+Disponibles                 ahora
+████████████████████████████
 ```
 
 ## Quick Start
@@ -110,9 +110,9 @@ opencode auth login -p deepseek
 
 | Message | Meaning | Fix |
 |---------|---------|-----|
-| `Configura auth.json → deepseek.key` | No API key found | Run `opencode auth login -p deepseek` |
-| `Error 401 — verifica tu API key` | Invalid key | Check your key at platform.deepseek.com |
-| `Error de conexion` | Network issue | Check your internet connection |
+| `sin API key` | No API key found | Run `opencode auth login -p deepseek` |
+| `error 401` | Invalid key | Check your key at platform.deepseek.com |
+| `error de conexion` | Network issue | Check your internet connection |
 
 ### OpenCode Go
 
@@ -144,9 +144,9 @@ opencode auth login -p opencode-go
 
 | Message | Meaning | Fix |
 |---------|---------|-----|
-| `Configura auth.json → opencode-go.key` | No API key found | Run `opencode auth login -p opencode-go` |
-| `Error 401 — verifica tu API key` | Invalid key | Re-login with `opencode auth login` |
-| `Sin datos` | API returned empty | Wait and retry, or check account status |
+| `sin API key` | No API key found | Run `opencode auth login -p opencode-go` |
+| `error 401` | Invalid key | Re-login with `opencode auth login` |
+| `sin datos` | API returned empty | Wait and retry, or check account status |
 
 ### OpenCode Zen
 
@@ -169,14 +169,18 @@ Structure:
 
 This is automatically configured when you enable OpenCode Zen billing via `/zen-free`.
 
+**How to get your authCookie:**
+
+1. Open OpenCode in your browser
+2. Open DevTools (F12) → Application → Cookies
+3. Find the `auth` cookie for `opencode.ai`
+4. Copy the value and paste it into the config file
+
 **Error messages:**
 
 | Message | Meaning | Fix |
 |---------|---------|-----|
-| `Configura opencode-quota/opencode.json` | Config file missing | Run `/zen-free` to auto-configure |
-| `Cookie expirada — ejecuta /zen-free` | Auth expired | Run `/zen-free` to refresh |
-| `Error 403` | Access denied | Check workspace permissions |
-| `Sin datos` | No billing data | Wait and retry |
+| `sin datos` | Config missing or auth failed | Run `/zen-free` to auto-configure |
 
 ## Commands
 
