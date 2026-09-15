@@ -27,6 +27,7 @@ function makeBar(pct: number): { text: string; color: string } {
 }
 
 function rpad(s: string, w: number): string {
+  if (w <= 0) return s;
   if (s.length >= w) return s.slice(0, w);
   return s + " ".repeat(w - s.length);
 }
@@ -270,12 +271,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
                       </text>
                       {d.pct >= 0 ? (() => {
                         const b = makeBar(d.pct);
-                        return (
-                          <text wrapMode="none">
-                            <text fg={b.color}>{b.text}</text>
-                            <text fg={b.color}>  {d.pct}%</text>
-                          </text>
-                        );
+                        return <text fg={b.color} wrapMode="none">{b.text + "  " + d.pct + "%"}</text>;
                       })() : null}
                     </>
                   )}
@@ -293,12 +289,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
                           </text>
                           {(() => {
                             const b = makeBar(line.pct);
-                            return (
-                              <text wrapMode="none">
-                                <text fg={b.color}>{b.text}</text>
-                                <text fg={b.color}>  {line.pct}%</text>
-                              </text>
-                            );
+                            return <text fg={b.color} wrapMode="none">{b.text + "  " + line.pct + "%"}</text>;
                           })()}
                         </>
                       )}
