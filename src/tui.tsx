@@ -6,10 +6,10 @@ import os from "node:os";
 import path from "node:path";
 
 const id = "@openplugins/token-balance";
-const BAR_W = 26;
-const REFRESH_INTERVAL_MS = 60_000;
+const W = 42;
+const REFRESH_MS = 60_000;
 
-// ─── Color helpers ────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────
 
 function pctColor(pct: number): string {
   if (pct >= 60) return "#50fa7b";
@@ -17,169 +17,157 @@ function pctColor(pct: number): string {
   return "#ff5555";
 }
 
-function barColored(percent: number, width: number): { text: string; color: string } {
-  const p = Math.max(0, Math.min(100, Math.round(percent)));
-  const filled = Math.round((p / 100) * width);
-  return {
-    text: "\u2588".repeat(filled) + "\u2591".repeat(width - filled),
-    color: pctColor(p),
-  };
+function bar(pct: number): { text: string; color: string } {
+  const p = Math.max(0, Math.min(100, Math.round(pct)));
+  const filled = Math.round((p / 100) * W);
+  return { text: "\u2588".repeat(filled) + "\u2591".repeat(W - filled), color: pctColor(p) };
 }
 
-// ─── Formatting ───────────────────────────────────────────────────────
-
-function formatCompact(ms: number): string {
-  if (ms <= 0) return "ahora";
-  const totalMinutes = Math.ceil(ms / 60000);
-  const totalHours = Math.floor(totalMinutes / 60);
-  if (totalHours >= 24) {
-    const days = Math.floor(totalHours / 24);
-    const remainH = totalHours % 24;
-    return remainH > 0 ? `${days}d ${remainH}h` : `${days}d`;
-  }
-  return totalHours >= 1 ? `${totalHours}h` : `${totalMinutes % 60}m`;
-}
-
-function lpad(s: string, w: number): string {
-  return s.length >= w ? s.slice(0, w) : " ".repeat(w - s.length) + s;
-}
-
-function rpad(s: string, w: number): string {
+function rpad(s: string, w: number = W): string {
   return s.length >= w ? s.slice(0, w) : s + " ".repeat(w - s.length);
 }
 
-// ─── Auth helpers ─────────────────────────────────────────────────────
+function formatTime(ms: number): string {
+  if (ms <= 0) return "ahora";
+  const mins = Math.ceil(ms / 60000);
+  const hrs = Math.floor(mins / 60);
+  if (hrs >= 24) {
+    const d = Math.floor(hrs / 24);
+    const rh = hrs % 24;
+    return rh > 0 ? `${d}d ${rh}h` : `${d}d`;
+  }
+  return hrs >= 1 ? `${hrs}h` : `${mins % 60}m`;
+}
 
-function readAuthFile(): Record<string, { type?: string; key?: string }> | undefined {
+// ─── Auth ─────────────────────────────────────────────────────────────
+
+function readAuth(): Record<string, { type?: string; key?: string }> | undefined {
   try {
     const home = os.homedir();
-    for (const file of [
+    for (const f of [
       path.join(home, ".local", "share", "opencode", "auth.json"),
       path.join(home, "AppData", "Roaming", "opencode", "auth.json"),
       path.join(home, "AppData", "Local", "opencode", "auth.json"),
-    ]) { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch {} }
+    ]) { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch {} }
   } catch {}
   return undefined;
 }
 
-function readZenConfig(): { workspaceId: string; authCookie: string } | undefined {
+function readZenCfg(): { workspaceId: string; authCookie: string } | undefined {
   try {
     const home = os.homedir();
-    for (const file of [
+    for (const f of [
       path.join(home, ".config", "opencode", "opencode-quota", "opencode.json"),
       path.join(home, "AppData", "Roaming", "opencode", "opencode-quota", "opencode.json"),
       path.join(home, "AppData", "Local", "opencode", "opencode-quota", "opencode.json"),
     ]) {
       try {
-        const config = JSON.parse(fs.readFileSync(file, "utf8"));
-        const workspaceId = typeof config?.workspaceId === "string" ? config.workspaceId.trim() : "";
-        const authCookie = typeof config?.authCookie === "string" ? config.authCookie.trim() : "";
-        if (workspaceId && authCookie) return { workspaceId, authCookie };
+        const c = JSON.parse(fs.readFileSync(f, "utf8"));
+        const wid = typeof c?.workspaceId === "string" ? c.workspaceId.trim() : "";
+        const cookie = typeof c?.authCookie === "string" ? c.authCookie.trim() : "";
+        if (wid && cookie) return { workspaceId: wid, authCookie: cookie };
       } catch {}
     }
   } catch {}
   return undefined;
 }
 
-// ─── Provider fetchers ────────────────────────────────────────────────
+// ─── Fetchers ─────────────────────────────────────────────────────────
 
-interface DeepSeekResult { text: string; barPercent: number; barColor: string }
+interface DS { value: string; pct: number }
 
-async function fetchDeepSeek(maxBalance: number): Promise<DeepSeekResult> {
-  const auth = readAuthFile();
+async function fetchDS(max: number): Promise<DS> {
+  const auth = readAuth();
   const key = auth?.deepseek?.key;
-  if (!key) return { text: "sin API key", barPercent: -1, barColor: "#808080" };
+  if (!key) return { value: "sin API key", pct: -1 };
   try {
-    const res = await fetch("https://api.deepseek.com/user/balance", {
+    const r = await fetch("https://api.deepseek.com/user/balance", {
       method: "GET",
       headers: { Authorization: `Bearer ${key}`, "User-Agent": "token-balance/1.0" },
       signal: AbortSignal.timeout(10000),
     });
-    if (!res.ok) return { text: `error ${res.status}`, barPercent: -1, barColor: "#808080" };
-    const data = await res.json() as Record<string, unknown>;
-    const infos = Array.isArray(data.balance_infos) ? data.balance_infos : [];
+    if (!r.ok) return { value: `error ${r.status}`, pct: -1 };
+    const d = await r.json() as Record<string, unknown>;
+    const infos = Array.isArray(d.balance_infos) ? d.balance_infos : [];
     const usd = infos.find((i: any) => i.currency === "USD") ?? infos[0];
     if (usd?.total_balance) {
-      const balance = parseFloat(usd.total_balance);
-      const pct = maxBalance > 0 ? Math.round((balance / maxBalance) * 100) : -1;
-      return { text: `${balance.toFixed(2)} USD`, barPercent: pct, barColor: pct >= 0 ? pctColor(pct) : "#808080" };
+      const bal = parseFloat(usd.total_balance);
+      return { value: `${bal.toFixed(2)} USD`, pct: max > 0 ? Math.round((bal / max) * 100) : -1 };
     }
-    return { text: "sin datos", barPercent: -1, barColor: "#808080" };
-  } catch { return { text: "error de conexion", barPercent: -1, barColor: "#808080" }; }
+    return { value: "sin datos", pct: -1 };
+  } catch { return { value: "error de conexion", pct: -1 }; }
 }
 
-interface GoLine { label: string; remaining: string; percent: number; barText: string; barColor: string }
+interface GoLine { label: string; time: string; pct: number; barText: string; barColor: string }
 
-async function fetchOpenCodeGo(): Promise<GoLine[]> {
-  const auth = readAuthFile();
+async function fetchGo(): Promise<GoLine[]> {
+  const auth = readAuth();
   const key = auth?.["opencode-go"]?.key ?? auth?.opencode?.key;
-  if (!key) return [{ label: "", remaining: "sin API key", percent: 0, barText: "", barColor: "#808080" }];
+  if (!key) return [{ label: "", time: "sin API key", pct: 0, barText: "", barColor: "#808080" }];
   try {
-    const res = await fetch("https://opencode.ai/zen/go/v1/usage", {
+    const r = await fetch("https://opencode.ai/zen/go/v1/usage", {
       method: "GET",
       headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
       signal: AbortSignal.timeout(10000),
     });
-    if (!res.ok) return [{ label: "", remaining: `error ${res.status}`, percent: 0, barText: "", barColor: "#808080" }];
-    const data = await res.json() as Record<string, unknown>;
-    const usage = data?.usage as Record<string, unknown> | undefined;
-    if (!usage) return [{ label: "", remaining: "sin datos", percent: 0, barText: "", barColor: "#808080" }];
+    if (!r.ok) return [{ label: "", time: `error ${r.status}`, pct: 0, barText: "", barColor: "#808080" }];
+    const d = await r.json() as Record<string, unknown>;
+    const u = d?.usage as Record<string, unknown> | undefined;
+    if (!u) return [{ label: "", time: "sin datos", pct: 0, barText: "", barColor: "#808080" }];
     const lines: GoLine[] = [];
     for (const w of [{ key: "rolling", label: "Five-hour" }, { key: "weekly", label: "Weekly" }, { key: "monthly", label: "Monthly" }]) {
-      const win = usage[w.key] as Record<string, unknown> | undefined;
+      const win = u[w.key] as Record<string, unknown> | undefined;
       if (!win || win.status !== "ok") continue;
       const used = typeof win.percent === "number" ? win.percent : 0;
-      const remaining = 100 - used;
+      const rem = 100 - used;
       const resetsAt = typeof win.resetsAt === "string" ? win.resetsAt : "";
-      const resetMs = resetsAt ? Math.max(0, Date.parse(resetsAt) - Date.now()) : 0;
-      const bar = barColored(remaining, BAR_W);
-      lines.push({ label: w.label, remaining: formatCompact(resetMs), percent: remaining, barText: bar.text, barColor: bar.color });
+      const ms = resetsAt ? Math.max(0, Date.parse(resetsAt) - Date.now()) : 0;
+      const b = bar(rem);
+      lines.push({ label: w.label, time: formatTime(ms), pct: rem, barText: b.text, barColor: b.color });
     }
-    return lines.length > 0 ? lines : [{ label: "", remaining: "sin datos", percent: 0, barText: "", barColor: "#808080" }];
-  } catch { return [{ label: "", remaining: "error de conexion", percent: 0, barText: "", barColor: "#808080" }]; }
+    return lines.length > 0 ? lines : [{ label: "", time: "sin datos", pct: 0, barText: "", barColor: "#808080" }];
+  } catch { return [{ label: "", time: "error de conexion", pct: 0, barText: "", barColor: "#808080" }]; }
 }
 
-async function fetchOpenCodeZen(): Promise<{ text: string; barFill: number; barColor: string }> {
-  const config = readZenConfig();
-  if (!config) return { text: "sin config", barFill: 0, barColor: "#808080" };
+async function fetchZen(): Promise<{ text: string; fill: number; color: string }> {
+  const cfg = readZenCfg();
+  if (!cfg) return { text: "sin config", fill: 0, color: "#808080" };
   try {
-    const res = await fetch(`https://opencode.ai/workspace/${encodeURIComponent(config.workspaceId)}/billing`, {
+    const r = await fetch(`https://opencode.ai/workspace/${encodeURIComponent(cfg.workspaceId)}/billing`, {
       method: "GET",
       headers: {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Gecko/20100101 Firefox/148.0",
         Accept: "text/html",
-        Cookie: `auth=${config.authCookie}`,
+        Cookie: `auth=${cfg.authCookie}`,
       },
       signal: AbortSignal.timeout(10000),
     });
-    if (!res.ok) return { text: `error ${res.status}`, barFill: 0, barColor: "#808080" };
-    const html = await res.text();
-    const BILLING_UNITS = 100_000_000;
-    let balance = 0;
-    let monthlyLimit: number | null = null;
-    let monthlyUsage: number | null = null;
-    const ssrRe = /\b(balance|monthlyLimit|monthlyUsage)\s*:\s*(\d+(?:\.\d+)?)\b/g;
-    const fields: Record<string, number> = {};
-    for (const m of html.matchAll(ssrRe)) fields[m[1]] = Number(m[2]);
-    if (Number.isFinite(fields.balance) && fields.balance >= 0) {
-      balance = fields.balance / BILLING_UNITS;
-      monthlyLimit = Number.isFinite(fields.monthlyLimit) && fields.monthlyLimit >= 0 ? fields.monthlyLimit : null;
-      monthlyUsage = Number.isFinite(fields.monthlyUsage) && fields.monthlyUsage >= 0 ? fields.monthlyUsage / BILLING_UNITS : null;
+    if (!r.ok) return { text: `error ${r.status}`, fill: 0, color: "#808080" };
+    const html = await r.text();
+    const U = 100_000_000;
+    let balance = 0, mLimit: number | null = null, mUsage: number | null = null;
+    const re = /\b(balance|monthlyLimit|monthlyUsage)\s*:\s*(\d+(?:\.\d+)?)\b/g;
+    const f: Record<string, number> = {};
+    for (const m of html.matchAll(re)) f[m[1]] = Number(m[2]);
+    if (Number.isFinite(f.balance) && f.balance >= 0) {
+      balance = f.balance / U;
+      mLimit = Number.isFinite(f.monthlyLimit) && f.monthlyLimit >= 0 ? f.monthlyLimit : null;
+      mUsage = Number.isFinite(f.monthlyUsage) && f.monthlyUsage >= 0 ? f.monthlyUsage / U : null;
     }
-    if (balance <= 0) return { text: "sin datos", barFill: 0, barColor: "#808080" };
-    if (monthlyLimit !== null && monthlyUsage !== null && monthlyLimit > 0) {
-      const pct = Math.round((Math.max(0, monthlyLimit - monthlyUsage) / monthlyLimit) * 100);
-      return { text: `Disponibles                    ahora`, barFill: Math.round((pct / 100) * BAR_W), barColor: pctColor(pct) };
+    if (balance <= 0) return { text: "sin datos", fill: 0, color: "#808080" };
+    if (mLimit !== null && mUsage !== null && mLimit > 0) {
+      const pct = Math.round((Math.max(0, mLimit - mUsage) / mLimit) * 100);
+      return { text: "Disponibles                    ahora", fill: Math.round((pct / 100) * W), color: pctColor(pct) };
     }
-    return { text: `Balance                USD ${balance.toFixed(2)}`, barFill: 0, barColor: "#808080" };
-  } catch { return { text: "error de conexion", barFill: 0, barColor: "#808080" }; }
+    return { text: `Balance                USD ${balance.toFixed(2)}`, fill: 0, color: "#808080" };
+  } catch { return { text: "error de conexion", fill: 0, color: "#808080" }; }
 }
 
 // ─── TUI Plugin ───────────────────────────────────────────────────────
 
 const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
   const maxBalance = typeof options?.deepseekMaxBalance === "number" ? options.deepseekMaxBalance : 0;
-  const [quotaOpen, setQuotaOpen] = createSignal(api.kv?.get<boolean>("token-balance.quotaOpen", true) ?? true);
+  const [open, setOpen] = createSignal(api.kv?.get<boolean>("token-balance.quotaOpen", true) ?? true);
 
   api.keymap?.registerLayer({
     commands: [
@@ -190,7 +178,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
         desc: "Collapse/expand the Quota sidebar panel",
         category: "Token Balance",
         slashName: "quota-toggle",
-        run() { const v = !quotaOpen(); setQuotaOpen(v); api.kv?.set("token-balance.quotaOpen", v); },
+        run() { const v = !open(); setOpen(v); api.kv?.set("token-balance.quotaOpen", v); },
       },
       {
         namespace: "palette",
@@ -222,88 +210,81 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
     bindings: [],
   });
 
-  const getMaxBalance = () => {
+  const getMax = () => {
     if (maxBalance > 0) return maxBalance;
     const kv = api.kv?.get<number>("token-balance.deepseekMaxBalance", 0);
     return typeof kv === "number" && kv > 0 ? kv : 0;
   };
 
-  const dispose = createRoot((disposeRoot) => {
-    const [dsData, setDsData] = createSignal<DeepSeekResult>({ text: "consultando...", barPercent: -1, barColor: "#808080" });
-    const [goData, setGoData] = createSignal<GoLine[]>([{ label: "", remaining: "consultando...", percent: 0, barText: "", barColor: "#808080" }]);
-    const [zenData, setZenData] = createSignal<{ text: string; barFill: number; barColor: string }>({ text: "consultando...", barFill: 0, barColor: "#808080" });
-    let disposed = false;
+  const dispose = createRoot((root) => {
+    const [ds, setDs] = createSignal<DS>({ value: "consultando...", pct: -1 });
+    const [go, setGo] = createSignal<GoLine[]>([{ label: "", time: "consultando...", pct: 0, barText: "", barColor: "#808080" }]);
+    const [zen, setZen] = createSignal<{ text: string; fill: number; color: string }>({ text: "consultando...", fill: 0, color: "#808080" });
+    let dead = false;
 
     const refresh = async () => {
-      if (disposed) return;
-      const mb = getMaxBalance();
-      const [ds, go, zen] = await Promise.all([fetchDeepSeek(mb), fetchOpenCodeGo(), fetchOpenCodeZen()]);
-      if (disposed) return;
-      setDsData(ds); setGoData(go); setZenData(zen);
+      if (dead) return;
+      const [d, g, z] = await Promise.all([fetchDS(getMax()), fetchGo(), fetchZen()]);
+      if (dead) return;
+      setDs(d); setGo(g); setZen(z);
     };
     void refresh();
-    const ticker = setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
+    const tick = setInterval(() => void refresh(), REFRESH_MS);
 
     api.slots.register({
       order: 151,
       slots: {
         sidebar_content() {
-          const ds = dsData();
-          const go = goData();
-          const zen = zenData();
-          const open = quotaOpen();
-          const arrow = open ? "\u25BC" : "\u25B6";
+          const d = ds();
+          const g = go();
+          const z = zen();
+          const isOpen = open();
+          const arrow = isOpen ? "\u25BC" : "\u25B6";
 
           return (
             <box gap={0}>
-              {/* Clickable Quota title */}
               <text
-                fg={api.theme.current.accent}
+                fg={api.theme.current.textMuted}
                 wrapMode="none"
-                onMouseDown={() => { const v = !quotaOpen(); setQuotaOpen(v); api.kv?.set("token-balance.quotaOpen", v); }}
+                onMouseDown={() => { const v = !open(); setOpen(v); api.kv?.set("token-balance.quotaOpen", v); }}
               >
                 {`Quota ${arrow}`}
               </text>
 
-              {open ? (
+              <text> </text>
+
+              {isOpen ? (
                 <>
-                  {/* DeepSeek: "7.48 USD" right-aligned, bar + % */}
-                  <text fg={api.theme.current.textMuted} wrapMode="none">
-                    {"\uD83D\uDC33 DeepSeek"}
-                  </text>
-                  <text fg={api.theme.current.text} wrapMode="none">{ds.text}</text>
-                  {ds.barPercent >= 0 ? (() => {
-                    const b = barColored(ds.barPercent, BAR_W);
-                    return <text fg={b.color} wrapMode="none">{`${b.text}  ${ds.barPercent}%`}</text>;
+                  <text fg={api.theme.current.textMuted} wrapMode="none">{"\uD83D\uDC33 Credits"}</text>
+                  <text fg={api.theme.current.text} wrapMode="none">{rpad(d.value)}</text>
+                  {d.pct >= 0 ? (() => {
+                    const b = bar(d.pct);
+                    return <text fg={b.color} wrapMode="none">{rpad(`${d.pct}%`)}{b.text}</text>;
                   })() : null}
 
-                  {/* OpenCode Go: label left, time far right, bar + % */}
-                  <text fg={api.theme.current.textMuted} wrapMode="none">
-                    {"\uD83D\uDC19 OpenCode Go"}
-                  </text>
-                  {go.map((line) => (
+                  <text> </text>
+
+                  <text fg={api.theme.current.textMuted} wrapMode="none">{"\uD83D\uDC19 OpenCode Go"}</text>
+                  {g.map((line) => (
                     <>
                       <text fg={api.theme.current.textMuted} wrapMode="none">
-                        {`${rpad(line.label, 14)}${lpad(line.remaining, 8)}`}
+                        {rpad(`${line.label}${line.time}`)}
                       </text>
-                      {line.barText ? (
-                        <text fg={line.barColor} wrapMode="none">
-                          {`${line.barText}  ${line.percent}%`}
-                        </text>
-                      ) : null}
+                      <text fg={line.barColor} wrapMode="none">
+                        {rpad(`${line.pct}%`)}{line.barText}
+                      </text>
                     </>
                   ))}
+
+                  <text> </text>
                 </>
               ) : null}
 
-              {/* OpenCode Zen — always visible, NO percentage */}
-              <text fg={api.theme.current.textMuted} wrapMode="none">
-                {"\u26A1 OpenCode Zen"}
-              </text>
-              <text fg={api.theme.current.text} wrapMode="none">{zen.text}</text>
-              {zen.barFill > 0 ? (
-                <text fg={zen.barColor} wrapMode="none">
-                  {"\u2588".repeat(zen.barFill) + "\u2591".repeat(BAR_W - zen.barFill)}
+              <text fg={api.theme.current.textMuted} wrapMode="none">{"\u26A1 OpenCode Zen"}</text>
+              <text fg={api.theme.current.text} wrapMode="none">{z.text}</text>
+              {z.fill > 0 ? (
+                <text fg={z.color} wrapMode="none">
+                  {"\u2588".repeat(z.fill) + "\u2591".repeat(W - z.fill)}
                 </text>
               ) : null}
             </box>
@@ -312,7 +293,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
       },
     });
 
-    return () => { disposed = true; clearInterval(ticker); disposeRoot(); };
+    return () => { dead = true; clearInterval(tick); root(); };
   });
 
   api.lifecycle.onDispose(dispose);
