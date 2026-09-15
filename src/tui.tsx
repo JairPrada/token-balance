@@ -9,7 +9,7 @@ const id = "@openplugins/token-balance";
 
 // Sidebar: 42 total, paddingLeft=2, paddingRight=2 → 38 usable
 const W = 38;
-const BAR = 38;
+const BAR = 33;
 const REFRESH_MS = 60_000;
 
 function makeBar(pct: number, colorFn: (p: number) => string): { text: string; color: string } {
@@ -310,7 +310,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
                   </text>
                 </>
               ) : (
-                <text fg={api.theme.current.textMuted} wrapMode="none">Sin datos</text>
+                <text fg={api.theme.current.textMuted} wrapMode="none">sin datos</text>
               )}
             </box>
           );
