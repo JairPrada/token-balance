@@ -9,21 +9,13 @@ const id = "@openplugins/token-balance";
 
 // Sidebar: 42 total, paddingLeft=2, paddingRight=2 → 38 usable
 const W = 38;
-const BAR = 33; // 38 - 2(space) - 3(pct)
+const BAR = 38;
 const REFRESH_MS = 60_000;
 
-// ─── Helpers ──────────────────────────────────────────────────────────
-
-function pctColor(pct: number): string {
-  if (pct >= 60) return "#50fa7b";
-  if (pct >= 30) return "#f1fa8c";
-  return "#ff5555";
-}
-
-function makeBar(pct: number): { text: string; color: string } {
+function makeBar(pct: number, colorFn: (p: number) => string): { text: string; color: string } {
   const p = Math.max(0, Math.min(100, Math.round(pct)));
   const filled = Math.round((p / 100) * BAR);
-  return { text: "\u2588".repeat(filled) + "\u2591".repeat(BAR - filled), color: pctColor(p) };
+  return { text: "\u2588".repeat(filled) + "\u2591".repeat(BAR - filled), color: colorFn(p) };
 }
 
 function rpad(s: string, w: number): string {
@@ -133,11 +125,11 @@ async function fetchGo(): Promise<GoLine[]> {
   } catch { return [{ label: "", time: "", pct: 0, error: "Error de conexion" }]; }
 }
 
-interface ZenResult { fill: number; color: string; error: string | null; timeText: string }
+interface ZenResult { fill: number; pct: number; error: string | null; timeText: string }
 
 async function fetchZen(): Promise<ZenResult> {
   const cfg = readZenCfg();
-  if (!cfg) return { fill: 0, color: "#808080", error: "Configura opencode-quota/opencode.json", timeText: "" };
+  if (!cfg) return { fill: 0, pct: -1, error: "Configura opencode-quota/opencode.json", timeText: "" };
   try {
     const r = await fetch(`https://opencode.ai/workspace/${encodeURIComponent(cfg.workspaceId)}/billing`, {
       method: "GET",
@@ -148,8 +140,8 @@ async function fetchZen(): Promise<ZenResult> {
       },
       signal: AbortSignal.timeout(10000),
     });
-    if (r.status === 401 || r.status === 403) return { fill: 0, color: "#808080", error: "Cookie expirada — ejecuta /zen-free", timeText: "" };
-    if (!r.ok) return { fill: 0, color: "#808080", error: `Error ${r.status}`, timeText: "" };
+    if (r.status === 401 || r.status === 403) return { fill: 0, pct: -1, error: "Cookie expirada — ejecuta /zen-free", timeText: "" };
+    if (!r.ok) return { fill: 0, pct: -1, error: `Error ${r.status}`, timeText: "" };
     const html = await r.text();
     const U = 100_000_000;
     let balance = 0, mLimit: number | null = null, mUsage: number | null = null;
@@ -161,13 +153,13 @@ async function fetchZen(): Promise<ZenResult> {
       mLimit = Number.isFinite(f.monthlyLimit) && f.monthlyLimit >= 0 ? f.monthlyLimit : null;
       mUsage = Number.isFinite(f.monthlyUsage) && f.monthlyUsage >= 0 ? f.monthlyUsage / U : null;
     }
-    if (balance <= 0) return { fill: 0, color: "#808080", error: "Sin datos", timeText: "" };
+    if (balance <= 0) return { fill: 0, pct: -1, error: "Sin datos", timeText: "" };
     if (mLimit !== null && mUsage !== null && mLimit > 0) {
       const pct = Math.round((Math.max(0, mLimit - mUsage) / mLimit) * 100);
-      return { fill: Math.round((pct / 100) * BAR), color: pctColor(pct), error: null, timeText: "ahora" };
+      return { fill: Math.round((pct / 100) * BAR), pct, error: null, timeText: "ahora" };
     }
-    return { fill: 0, color: "#808080", error: null, timeText: "" };
-  } catch { return { fill: 0, color: "#808080", error: "Error de conexion", timeText: "" }; }
+    return { fill: 0, pct: -1, error: null, timeText: "" };
+  } catch { return { fill: 0, pct: -1, error: "Error de conexion", timeText: "" }; }
 }
 
 // ─── TUI Plugin ───────────────────────────────────────────────────────
@@ -175,6 +167,12 @@ async function fetchZen(): Promise<ZenResult> {
 const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
   const maxBalance = typeof options?.deepseekMaxBalance === "number" ? options.deepseekMaxBalance : 0;
   const [open, setOpen] = createSignal(api.kv?.get<boolean>("token-balance.quotaOpen", true) ?? true);
+
+  function pctColor(pct: number): string {
+    if (pct >= 60) return api.theme.current.success;
+    if (pct >= 30) return api.theme.current.warning;
+    return api.theme.current.error;
+  }
 
   api.keymap?.registerLayer({
     commands: [
@@ -226,7 +224,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
   const dispose = createRoot((root) => {
     const [ds, setDs] = createSignal<DS>({ value: "", pct: -1, error: "Cargando..." });
     const [go, setGo] = createSignal<GoLine[]>([{ label: "", time: "", pct: 0, error: "Cargando..." }]);
-    const [zen, setZen] = createSignal<ZenResult>({ fill: 0, color: "#808080", error: "Cargando...", timeText: "" });
+    const [zen, setZen] = createSignal<ZenResult>({ fill: 0, pct: -1, error: "Cargando...", timeText: "" });
     let dead = false;
 
     const refresh = async () => {
@@ -270,7 +268,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
                         {rpad("Credits", W - d.value.length) + d.value}
                       </text>
                       {d.pct >= 0 ? (() => {
-                        const b = makeBar(d.pct);
+                        const b = makeBar(d.pct, pctColor);
                         return <text fg={b.color} wrapMode="none">{b.text + "  " + d.pct + "%"}</text>;
                       })() : null}
                     </>
@@ -288,7 +286,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
                             {rpad(line.label, W - line.time.length) + line.time}
                           </text>
                           {(() => {
-                            const b = makeBar(line.pct);
+                            const b = makeBar(line.pct, pctColor);
                             return <text fg={b.color} wrapMode="none">{b.text + "  " + line.pct + "%"}</text>;
                           })()}
                         </>
@@ -307,7 +305,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
                   <text fg={api.theme.current.text} wrapMode="none">
                     {rpad("Disponibles", W - z.timeText.length) + z.timeText}
                   </text>
-                  <text fg={z.color} wrapMode="none">
+                  <text fg={pctColor(z.pct)} wrapMode="none">
                     {"\u2588".repeat(z.fill) + "\u2591".repeat(BAR - z.fill)}
                   </text>
                 </>
