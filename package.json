@@ -1,21 +1,28 @@
 {
   "name": "@openplugins/token-balance",
-  "version": "1.0.0",
-  "description": "OpenCode sidebar plugin: DeepSeek, OpenCode Go, OpenCode Zen balance + Zen free model availability",
+  "version": "1.0.1",
+  "description": "OpenCode sidebar plugin: DeepSeek, OpenCode Go and OpenCode Zen balance",
   "type": "module",
   "main": "./dist/index.js",
-  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     },
     "./tui": {
-      "import": "./dist/tui.js",
-      "types": "./dist/tui.d.ts"
+      "types": "./dist/tui.d.ts",
+      "default": "./dist/tui.js"
     }
   },
+  "oc-plugin": [
+    "server",
+    "tui"
+  ],
   "files": [
     "dist"
   ],
@@ -39,12 +46,12 @@
   "author": "Jair Prada",
   "license": "MIT",
   "peerDependencies": {
-    "@opencode-ai/plugin": ">=1.18.0",
-    "@opentui/core": ">=0.4.0",
-    "@opentui/solid": ">=0.4.0",
-    "solid-js": ">=1.9.0"
+    "@opencode-ai/plugin": ">=1.18.0"
   },
   "dependencies": {
+    "@opentui/core": "0.4.5",
+    "@opentui/solid": "0.4.5",
+    "solid-js": "^1.9.12",
     "xdg-basedir": "^5.1.0"
   },
   "devDependencies": {

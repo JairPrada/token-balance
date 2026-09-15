@@ -7,10 +7,9 @@ OpenCode sidebar plugin that displays token balances and quotas for multiple pro
 
 ## Features
 
-- **DeepSeek** — Balance (USD/CNY)
-- **OpenCode Go** — 5-hour rolling, weekly, and monthly quotas with countdown
-- **OpenCode Zen** — Billing balance, monthly budget usage
-- **Zen Free Models** — Real-time availability of free models
+- **DeepSeek** — Balance in USD with a usage percentage bar
+- **OpenCode Go** — 5-hour rolling, weekly, and monthly quotas with countdown and remaining percentage
+- **OpenCode Zen** — Availability status with a full bar indicator
 
 ## Installation
 
@@ -20,9 +19,7 @@ npm install -g @openplugins/token-balance
 
 ## Configuration
 
-Add the plugin to your OpenCode TUI config:
-
-### `~/.config/opencode/tui.json`
+Add the plugin to your OpenCode config (`~/.config/opencode/opencode.json`):
 
 ```json
 {
@@ -35,24 +32,22 @@ That's it! The plugin automatically detects which providers you have configured 
 ## How It Looks
 
 ```
+▼ Quota
+
 🐳 DeepSeek
-Total balance               USD 7.48
-████████████████████████░        94%
+Total balance                 USD 7.48
+████████████████████████░░         94%
 
 🐙 OpenCode Go
-Five-hour                         3h
-████████████████████████░   97% left
-Weekly                            5d
-███████████████████████░░   90% left
-Monthly                          27d
-████████████████████████░   94% left
+Five-hour                          59m
+███████████████████████░░░    88% left
+Weekly                           5d 6h
+██████████████████████░░░░    86% left
+Monthly                         27d 9h
+████████████████████████░░    93% left
 
 ⚡ OpenCode Zen
-Balance                USD 12.50
-████████████████████████░   94%
-
-★ Zen Free Models
-Disponibles                    ahora
+Disponibles                      ahora
 ██████████████████████████
 ```
 
@@ -60,53 +55,29 @@ Disponibles                    ahora
 
 ### DeepSeek
 
-The plugin reads your DeepSeek API key from (in order):
-
-1. Environment variable: `DEEPSEEK_API_KEY`
-2. `opencode.json` → `provider.deepseek.apiKey`
-3. `~/.local/share/opencode/auth.json` → `deepseek.key`
+The plugin reads your DeepSeek API key from `~/.local/share/opencode/auth.json` → `deepseek.key`.
 
 Or configure via:
+
 ```bash
 opencode auth login -p deepseek
 ```
 
 ### OpenCode Go
 
-The plugin reads your OpenCode Go API key from:
-
-1. Environment variable: `OPENCODE_API_KEY`
-2. `~/.local/share/opencode/auth.json` → `opencode-go.key` or `opencode.key`
+The plugin reads your OpenCode Go API key from `~/.local/share/opencode/auth.json` → `opencode-go.key` (or `opencode.key`).
 
 Or configure via:
+
 ```bash
 opencode auth login -p opencode-go
 ```
 
 ### OpenCode Zen
 
-The plugin reads your Zen billing config from:
-
-`~/.config/opencode/opencode-quota/opencode.json`
+The plugin reads your Zen billing config from `~/.config/opencode/opencode-quota/opencode.json`.
 
 This is automatically configured when you enable OpenCode Zen billing.
-
-### Zen Free Models
-
-The plugin reads your OpenCode auth key from:
-
-`~/.local/share/opencode/auth.json` → `opencode.key`
-
-This is automatically configured when you sign in to OpenCode.
-
-## Behavior
-
-| Provider Status | What You See |
-|----------------|--------------|
-| All keys configured | Full panel with all 4 sections |
-| Some keys missing | Only available sections shown |
-| No keys configured | "No API key" message in each section |
-| API error | Error message in the section |
 
 ## Refresh
 
@@ -115,7 +86,6 @@ The sidebar auto-refreshes every 60 seconds.
 ## Security
 
 - **No tokens are stored in the plugin** — credentials are read from your existing OpenCode config
-- **No network calls on startup** — only fetches when the sidebar is visible
 - **No telemetry** — zero external tracking
 
 ## License

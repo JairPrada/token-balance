@@ -7,15 +7,16 @@ import path from "node:path";
 
 const id = "@openplugins/token-balance";
 
-// Sidebar: 42 total, paddingLeft=2, paddingRight=2 → 38 usable
-const W = 38;
-const BAR = 33; // bar width: 38 - space(2) - pct(3)
+// Sidebar: 42 total, paddingLeft=2, paddingRight=2 → 38 usable, right pad 3 → 35
+const W = 35;
+const BAR = 26;
+const BAR_LABEL_W = W - BAR - 1;
 const REFRESH_MS = 60_000;
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
 function pctColor(pct: number): string {
-  if (pct >= 60) return "#50fa7b";
+  if (pct >= 60) return "#98c379";
   if (pct >= 30) return "#f1fa8c";
   return "#ff5555";
 }
@@ -29,6 +30,11 @@ function makeBar(pct: number): { text: string; color: string } {
 function rpad(s: string, w: number): string {
   if (s.length >= w) return s.slice(0, w);
   return s + " ".repeat(w - s.length);
+}
+
+function lpad(s: string, w: number): string {
+  if (s.length >= w) return s.slice(0, w);
+  return " ".repeat(w - s.length) + s;
 }
 
 function formatTime(ms: number): string {
@@ -96,7 +102,7 @@ async function fetchDS(max: number): Promise<DS> {
     const usd = infos.find((i: any) => i.currency === "USD") ?? infos[0];
     if (usd?.total_balance) {
       const bal = parseFloat(usd.total_balance);
-      return { value: `${bal.toFixed(2)} USD`, pct: max > 0 ? Math.round((bal / max) * 100) : -1 };
+      return { value: `USD ${bal.toFixed(2)}`, pct: max > 0 ? Math.round((bal / max) * 100) : -1 };
     }
     return { value: "sin datos", pct: -1 };
   } catch { return { value: "error de conexion", pct: -1 }; }
@@ -132,9 +138,9 @@ async function fetchGo(): Promise<GoLine[]> {
   } catch { return [{ label: "", time: "error de conexion", pct: 0 }]; }
 }
 
-async function fetchZen(): Promise<{ fill: number; color: string }> {
+async function fetchZen(): Promise<boolean> {
   const cfg = readZenCfg();
-  if (!cfg) return { fill: 0, color: "#808080" };
+  if (!cfg) return false;
   try {
     const r = await fetch(`https://opencode.ai/workspace/${encodeURIComponent(cfg.workspaceId)}/billing`, {
       method: "GET",
@@ -145,25 +151,8 @@ async function fetchZen(): Promise<{ fill: number; color: string }> {
       },
       signal: AbortSignal.timeout(10000),
     });
-    if (!r.ok) return { fill: 0, color: "#808080" };
-    const html = await r.text();
-    const U = 100_000_000;
-    let balance = 0, mLimit: number | null = null, mUsage: number | null = null;
-    const re = /\b(balance|monthlyLimit|monthlyUsage)\s*:\s*(\d+(?:\.\d+)?)\b/g;
-    const f: Record<string, number> = {};
-    for (const m of html.matchAll(re)) f[m[1]] = Number(m[2]);
-    if (Number.isFinite(f.balance) && f.balance >= 0) {
-      balance = f.balance / U;
-      mLimit = Number.isFinite(f.monthlyLimit) && f.monthlyLimit >= 0 ? f.monthlyLimit : null;
-      mUsage = Number.isFinite(f.monthlyUsage) && f.monthlyUsage >= 0 ? f.monthlyUsage / U : null;
-    }
-    if (balance <= 0) return { fill: 0, color: "#808080" };
-    if (mLimit !== null && mUsage !== null && mLimit > 0) {
-      const pct = Math.round((Math.max(0, mLimit - mUsage) / mLimit) * 100);
-      return { fill: Math.round((pct / 100) * BAR), color: pctColor(pct) };
-    }
-    return { fill: 0, color: "#808080" };
-  } catch { return { fill: 0, color: "#808080" }; }
+    return r.ok;
+  } catch { return false; }
 }
 
 // ─── TUI Plugin ───────────────────────────────────────────────────────
@@ -222,7 +211,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
   const dispose = createRoot((root) => {
     const [ds, setDs] = createSignal<DS>({ value: "consultando...", pct: -1 });
     const [go, setGo] = createSignal<GoLine[]>([{ label: "", time: "consultando...", pct: 0 }]);
-    const [zen, setZen] = createSignal<{ fill: number; color: string }>({ fill: 0, color: "#808080" });
+    const [zen, setZen] = createSignal<boolean>(false);
     let dead = false;
 
     const refresh = async () => {
@@ -244,64 +233,58 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
           const isOpen = open();
           const arrow = isOpen ? "\u25BC" : "\u25B6";
 
-          // Right-aligned value: pad label to fit value at end
-          const creditsLine = rpad("Credits", W - d.value.length) + d.value;
+          const t = api.theme.current;
+
+          const balanceLine = rpad("Total balance", W - d.value.length) + d.value;
 
           return (
             <box gap={0}>
               <text
-                fg={api.theme.current.textMuted}
+                fg={t.textMuted}
                 wrapMode="none"
                 onMouseDown={() => { const v = !open(); setOpen(v); api.kv?.set("token-balance.quotaOpen", v); }}
               >
-                {`Quota ${arrow}`}
+                {`${arrow} Quota`}
               </text>
               <text> </text>
 
               {isOpen ? (
                 <>
-                  <text fg={api.theme.current.textMuted} wrapMode="none">{"\uD83D\uDC33 DeepSeek"}</text>
-                  <text fg={api.theme.current.text} wrapMode="none">{creditsLine}</text>
+                  <text fg={t.textMuted} wrapMode="none">{"\uD83D\uDC33 DeepSeek"}</text>
+                  <text fg={t.text} wrapMode="none">{balanceLine}</text>
                   {d.pct >= 0 ? (() => {
                     const b = makeBar(d.pct);
                     return (
-                      <text wrapMode="none">
-                        <text fg={b.color}>{b.text}</text>
-                        <text fg={b.color}>  {d.pct}%</text>
-                      </text>
+                      <text fg={b.color} wrapMode="none">{b.text} {lpad(`${d.pct}%`, BAR_LABEL_W)}</text>
                     );
                   })() : null}
                   <text> </text>
 
-                  <text fg={api.theme.current.textMuted} wrapMode="none">{"\uD83D\uDC19 OpenCode Go"}</text>
+                  <text fg={t.textMuted} wrapMode="none">{"\uD83D\uDC19 OpenCode Go"}</text>
                   {g.map((line) => (
                     <>
-                      <text fg={api.theme.current.textMuted} wrapMode="none">
+                      <text fg={t.textMuted} wrapMode="none">
                         {rpad(line.label, W - line.time.length) + line.time}
                       </text>
                       {(() => {
                         const b = makeBar(line.pct);
                         return (
-                          <text wrapMode="none">
-                            <text fg={b.color}>{b.text}</text>
-                            <text fg={b.color}>  {line.pct}%</text>
-                          </text>
+                          <text fg={b.color} wrapMode="none">{b.text} {lpad(`${line.pct}% left`, BAR_LABEL_W)}</text>
                         );
                       })()}
                     </>
                   ))}
                   <text> </text>
+
+                  <text fg={t.textMuted} wrapMode="none">{"\u26A1 OpenCode Zen"}</text>
+                  <text fg={t.textMuted} wrapMode="none">
+                    {z ? rpad("Disponibles", W - 5) + "ahora" : "sin datos"}
+                  </text>
+                  {z ? (
+                    <text fg="#98c379" wrapMode="none">{"\u2588".repeat(BAR)}</text>
+                  ) : null}
                 </>
               ) : null}
-
-              <text fg={api.theme.current.textMuted} wrapMode="none">{"\u26A1 OpenCode Zen"}</text>
-              {z.fill > 0 ? (
-                <text fg={z.color} wrapMode="none">
-                  {"\u2588".repeat(z.fill) + "\u2591".repeat(BAR - z.fill)}
-                </text>
-              ) : (
-                <text fg={api.theme.current.textMuted} wrapMode="none">sin datos</text>
-              )}
             </box>
           );
         },
