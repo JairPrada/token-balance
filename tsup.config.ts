@@ -4,7 +4,6 @@ export default defineConfig([
   {
     entry: {
       index: "src/index.ts",
-      tui: "src/tui.tsx",
     },
     format: ["esm"],
     dts: true,
@@ -12,10 +11,6 @@ export default defineConfig([
     clean: true,
     external: [
       "@opencode-ai/plugin",
-      "@opencode-ai/plugin/tui",
-      "@opentui/core",
-      "@opentui/solid",
-      "solid-js",
     ],
   },
 ]);
