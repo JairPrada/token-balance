@@ -327,6 +327,26 @@ Run `/tb-setup` to configure the provider, or check manually:
 
 Ensure your terminal supports true color (24-bit). Most modern terminals do.
 
+## Docker Testing
+
+The plugin has been verified to work in a clean Docker environment:
+
+```bash
+# Build the test image
+docker build -f test-docker/Dockerfile.opencode -t opencode-plugin-test test-docker/
+
+# Run the tests
+docker run --rm opencode-plugin-test
+```
+
+Tests verify:
+- opencode installation
+- Plugin installation and configuration
+- Correct JSX runtime (no React dependency)
+- solid-js and @opentui/solid availability
+- Plugin can be loaded
+- Config directory is writable
+
 ## Security
 
 - **Credentials read from existing config** — no tokens stored by the plugin itself
