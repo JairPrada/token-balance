@@ -82,6 +82,19 @@ function getPluginConfigPaths(): string[] {
   return p;
 }
 
+// Backwards compat: old opencode-quota plugin config
+function getOldZenConfigPaths(): string[] {
+  const p: string[] = [];
+  if (CFG_DIR) p.push(path.join(CFG_DIR, "opencode-quota", "opencode.json"));
+  p.push(
+    path.join(HOME, ".config", "opencode", "opencode-quota", "opencode.json"),
+    path.join(HOME, "Library", "Application Support", "opencode", "opencode-quota", "opencode.json"),
+    path.join(HOME, "AppData", "Roaming", "opencode", "opencode-quota", "opencode.json"),
+    path.join(HOME, "AppData", "Local", "opencode", "opencode-quota", "opencode.json"),
+  );
+  return p;
+}
+
 function getOpencodeConfigPaths(): string[] {
   const p: string[] = [];
   if (CFG_DIR) p.push(path.join(CFG_DIR, "opencode.json"));
@@ -102,6 +115,7 @@ function readFirst<T>(paths: string[]): T | undefined {
 interface AuthEntry { type?: string; key?: string }
 interface PluginConfig {
   providers?: { deepseek?: boolean; "opencode-go"?: boolean; "opencode-zen"?: boolean };
+  apiKeys?: { deepseek?: string; "opencode-go"?: string };
   zen?: { workspaceId?: string; authCookie?: string };
 }
 interface OcProvider { apiKey?: string; options?: { apiKey?: string } }
@@ -112,15 +126,39 @@ function readAuth(): Record<string, AuthEntry> | undefined {
 }
 
 function readPluginConfig(): PluginConfig {
-  return readFirst<PluginConfig>(getPluginConfigPaths()) ?? {};
+  // Try new config first
+  const cfg = readFirst<PluginConfig>(getPluginConfigPaths());
+  if (cfg?.zen?.workspaceId && cfg?.zen?.authCookie) return cfg;
+
+  // Fallback: old opencode-quota config (flat structure)
+  const old = readFirst<{ workspaceId?: string; authCookie?: string }>(getOldZenConfigPaths());
+  if (old?.workspaceId && old?.authCookie) {
+    return { ...cfg, zen: { workspaceId: old.workspaceId, authCookie: old.authCookie } };
+  }
+
+  return cfg ?? {};
 }
 
 function readOpencodeConfig(): OpencodeConfig | undefined {
   return readFirst<OpencodeConfig>(getOpencodeConfigPaths());
 }
 
-// ─── Key Resolution (3-tier) ──────────────────────────────────────────
-// Tier 1: env var  →  Tier 2: opencode.json  →  Tier 3: auth.json
+function getConfigDir(): string {
+  if (CFG_DIR) return CFG_DIR;
+  const platform = os.platform();
+  if (platform === "darwin") return path.join(HOME, "Library", "Application Support", "opencode");
+  if (platform === "win32") return path.join(process.env.APPDATA || path.join(HOME, "AppData", "Roaming"), "opencode");
+  return path.join(HOME, ".config", "opencode");
+}
+
+function writePluginConfig(cfg: PluginConfig): void {
+  const dir = path.join(getConfigDir(), "token-balance");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify(cfg, null, 2), "utf8");
+}
+
+// ─── Key Resolution (4-tier) ──────────────────────────────────────────
+// Tier 1: env var → Tier 2: opencode.json → Tier 3: config.json → Tier 4: auth.json
 
 function resolveKey(
   auth: Record<string, AuthEntry> | undefined,
@@ -144,7 +182,12 @@ function resolveKey(
     }
   }
 
-  // Tier 3: auth.json
+  // Tier 3: token-balance/config.json (from setup wizard)
+  const cfg = readPluginConfig();
+  const cfgKey = cfg.apiKeys?.[providerId as keyof typeof cfg.apiKeys];
+  if (cfgKey) return cfgKey;
+
+  // Tier 4: auth.json
   if (auth?.[providerId]?.key) return auth[providerId].key;
   for (const fid of fallbackIds ?? []) {
     if (auth?.[fid]?.key) return auth[fid].key;
@@ -226,6 +269,165 @@ async function fetchZen(): Promise<boolean> {
     });
     return r.ok;
   } catch { return false; }
+}
+
+// ─── Setup Wizard ─────────────────────────────────────────────────────
+
+function runSetupWizard(api: TuiPluginApi) {
+  const auth = readAuth();
+  const cfg = readPluginConfig();
+
+  const deepseekKey = resolveKey(auth, "deepseek", "DEEPSEEK_API_KEY");
+  const goKey = resolveKey(auth, "opencode-go", "OPENCODE_API_KEY", ["opencode"]);
+  const zenOk = !!(cfg.zen?.authCookie && cfg.zen?.workspaceId);
+
+  const status = [
+    `DeepSeek:      ${deepseekKey ? "✓ configured" : "✗ not found"}`,
+    `OpenCode Go:   ${goKey ? "✓ configured" : "✗ not found"}`,
+    `OpenCode Zen:  ${zenOk ? "✓ configured" : "✗ not configured"}`,
+  ].join("\n");
+
+  // Step 1: Show status
+  api.ui?.dialog?.replace?.(() =>
+    api.ui.DialogPrompt({
+      title: "Token Balance — Setup",
+      description: () => `Current status:\n\n${status}\n\nPress Enter to start setup, or Esc to cancel.`,
+      placeholder: "",
+      onConfirm() {
+        if (!deepseekKey) return promptDeepSeek(api, cfg, auth);
+        if (!goKey) return promptGo(api, cfg, auth);
+        if (!zenOk) return promptZenCookie(api, cfg);
+        return showSetupDone(api);
+      },
+      onCancel() { api.ui.dialog?.clear(); },
+    })
+  );
+}
+
+function promptDeepSeek(api: TuiPluginApi, cfg: PluginConfig, auth: Record<string, AuthEntry> | undefined) {
+  api.ui?.dialog?.replace?.(() =>
+    api.ui.DialogPrompt({
+      title: "Step 1 — DeepSeek API Key",
+      description: () => "Enter your DeepSeek API key.\nGet it at: platform.deepseek.com → API Keys\n\nOr press Enter to skip.",
+      placeholder: "sk-...",
+      onConfirm(value) {
+        const k = value.trim();
+        if (k) {
+          cfg.apiKeys = { ...cfg.apiKeys, deepseek: k };
+          writePluginConfig(cfg);
+          api.ui.toast({ variant: "success", message: "DeepSeek key saved" });
+        }
+        promptGo(api, cfg, auth);
+      },
+      onCancel() { api.ui.dialog?.clear(); },
+    })
+  );
+}
+
+function promptGo(api: TuiPluginApi, cfg: PluginConfig, auth: Record<string, AuthEntry> | undefined) {
+  const alreadyHas = !!resolveKey(auth, "opencode-go", "OPENCODE_API_KEY", ["opencode"]);
+  if (alreadyHas) {
+    // If user has key from env/opencode.json/auth.json, skip to Zen
+    if (!cfg.zen?.authCookie) return promptZenCookie(api, cfg);
+    return showSetupDone(api);
+  }
+  api.ui?.dialog?.replace?.(() =>
+    api.ui.DialogPrompt({
+      title: "Step 2 — OpenCode Go API Key",
+      description: () => "Enter your OpenCode Go API key.\nIf you use OPENCODE_API_KEY env var, press Enter to skip.",
+      placeholder: "your-opencode-go-key",
+      onConfirm(value) {
+        const k = value.trim();
+        if (k) {
+          cfg.apiKeys = { ...cfg.apiKeys, "opencode-go": k };
+          writePluginConfig(cfg);
+          api.ui.toast({ variant: "success", message: "OpenCode Go key saved" });
+        }
+        if (!cfg.zen?.authCookie) return promptZenCookie(api, cfg);
+        showSetupDone(api);
+      },
+      onCancel() { api.ui.dialog?.clear(); },
+    })
+  );
+}
+
+function promptZenCookie(api: TuiPluginApi, cfg: PluginConfig) {
+  api.ui?.dialog?.replace?.(() =>
+    api.ui.DialogPrompt({
+      title: "Step 3 — OpenCode Zen Cookie",
+      description: () => [
+        "To get your Zen cookie:",
+        "",
+        "1. Open opencode.ai in your browser",
+        "2. Log in to your account",
+        "3. Press F12 → Application → Cookies",
+        "4. Find the 'auth' cookie for opencode.ai",
+        "5. Copy its value and paste it below",
+        "",
+        "Press Enter to skip Zen setup.",
+      ].join("\n"),
+      placeholder: "paste auth cookie value here",
+      onConfirm(value) {
+        const c = value.trim();
+        if (c) {
+          cfg.zen = { ...cfg.zen, authCookie: c };
+          writePluginConfig(cfg);
+          promptZenWorkspace(api, cfg);
+        } else {
+          showSetupDone(api);
+        }
+      },
+      onCancel() { api.ui.dialog?.clear(); },
+    })
+  );
+}
+
+function promptZenWorkspace(api: TuiPluginApi, cfg: PluginConfig) {
+  api.ui?.dialog?.replace?.(() =>
+    api.ui.DialogPrompt({
+      title: "Step 4 — Workspace ID",
+      description: () => [
+        "Enter your OpenCode workspace ID.",
+        "",
+        "Find it in the URL when you open opencode.ai:",
+        "  opencode.ai/workspace/wrk_XXXXX/...",
+        "",
+        "Paste the workspace ID below.",
+      ].join("\n"),
+      placeholder: "wrk_...",
+      onConfirm(value) {
+        const w = value.trim();
+        if (w) {
+          cfg.zen = { ...cfg.zen, workspaceId: w };
+          writePluginConfig(cfg);
+          api.ui.toast({ variant: "success", message: "Zen workspace ID saved" });
+        }
+        showSetupDone(api);
+      },
+      onCancel() { api.ui.dialog?.clear(); },
+    })
+  );
+}
+
+function showSetupDone(api: TuiPluginApi) {
+  const cfg = readPluginConfig();
+  const auth = readAuth();
+  const lines = [
+    "Setup complete! Restart OpenCode to apply.",
+    "",
+    `DeepSeek:      ${resolveKey(auth, "deepseek", "DEEPSEEK_API_KEY") ? "✓" : "✗"}`,
+    `OpenCode Go:   ${resolveKey(auth, "opencode-go", "OPENCODE_API_KEY", ["opencode"]) ? "✓" : "✗"}`,
+    `OpenCode Zen:  ${cfg.zen?.authCookie ? "✓" : "✗"}`,
+  ];
+  api.ui?.dialog?.replace?.(() =>
+    api.ui.DialogPrompt({
+      title: "Token Balance — Done",
+      description: () => lines.join("\n"),
+      placeholder: "",
+      onConfirm() { api.ui.dialog?.clear(); },
+      onCancel() { api.ui.dialog?.clear(); },
+    })
+  );
 }
 
 // ─── TUI Plugin ───────────────────────────────────────────────────────
@@ -313,6 +515,15 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
             })
           );
         },
+      },
+      {
+        namespace: "palette",
+        name: "token-balance.setup",
+        title: "Setup Wizard",
+        desc: "Step-by-step setup for DeepSeek, OpenCode Go, and OpenCode Zen",
+        category: "Token Balance",
+        slashName: "tb-setup",
+        run() { runSetupWizard(api); },
       },
     ],
     bindings: [],
