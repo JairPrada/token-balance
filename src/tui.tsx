@@ -6,7 +6,9 @@ import os from "node:os";
 import path from "node:path";
 
 const id = "@openplugins/token-balance";
-const W = 42;
+
+// Sidebar = 42 chars total, paddingLeft=2, paddingRight=2 → content = 38 chars
+const W = 38;
 const REFRESH_MS = 60_000;
 
 // ─── Helpers ──────────────────────────────────────────────────────────
@@ -255,8 +257,10 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
 
               {isOpen ? (
                 <>
-                  <text fg={api.theme.current.textMuted} wrapMode="none">{"\uD83D\uDC33 Credits"}</text>
-                  <text fg={api.theme.current.text} wrapMode="none">{rpad(d.value)}</text>
+                  <text fg={api.theme.current.textMuted} wrapMode="none">DeepSeek</text>
+                  <text fg={api.theme.current.textMuted} wrapMode="none">
+                    {`Credits${rpad(d.value, W - 7)}`}
+                  </text>
                   {d.pct >= 0 ? (() => {
                     const b = bar(d.pct);
                     return <text fg={b.color} wrapMode="none">{rpad(`${d.pct}%`)}{b.text}</text>;
@@ -264,11 +268,11 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
 
                   <text> </text>
 
-                  <text fg={api.theme.current.textMuted} wrapMode="none">{"\uD83D\uDC19 OpenCode Go"}</text>
+                  <text fg={api.theme.current.textMuted} wrapMode="none">OpenCode Go</text>
                   {g.map((line) => (
                     <>
                       <text fg={api.theme.current.textMuted} wrapMode="none">
-                        {rpad(`${line.label}${line.time}`)}
+                        {`${line.label}${rpad(line.time, W - line.label.length)}`}
                       </text>
                       <text fg={line.barColor} wrapMode="none">
                         {rpad(`${line.pct}%`)}{line.barText}
@@ -280,7 +284,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
                 </>
               ) : null}
 
-              <text fg={api.theme.current.textMuted} wrapMode="none">{"\u26A1 OpenCode Zen"}</text>
+              <text fg={api.theme.current.textMuted} wrapMode="none">OpenCode Zen</text>
               <text fg={api.theme.current.text} wrapMode="none">{z.text}</text>
               {z.fill > 0 ? (
                 <text fg={z.color} wrapMode="none">
