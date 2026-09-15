@@ -1,0 +1,24 @@
+FROM node:22-slim
+
+# Install dependencies for opencode
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install opencode globally
+RUN npm install -g opencode-ai 2>&1
+
+# Create opencode config directory and add plugin
+RUN mkdir -p /root/.config/opencode && \
+    echo '{"plugin":["@openplugins/token-balance"]}' > /root/.config/opencode/opencode.json
+
+# Install the plugin globally
+COPY openplugins-token-balance-*.tgz /tmp/
+RUN cd /tmp && npm install -g openplugins-token-balance-1.1.1.tgz 2>&1
+
+# Copy test script
+COPY test-opencode.mjs /test.mjs
+
+# Run tests
+CMD ["node", "/test.mjs"]
