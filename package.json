@@ -1,6 +1,6 @@
 {
   "name": "@openplugins/token-balance",
-  "version": "1.0.0",
+  "version": "1.1.4",
   "description": "OpenCode sidebar plugin: DeepSeek, OpenCode Go and OpenCode Zen balance",
   "type": "module",
   "main": "./dist/tui.js",
