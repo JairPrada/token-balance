@@ -17,16 +17,24 @@ const id = "@openplugins/token-balance";
 const W = 35;
 const REFRESH_MS = 60_000;
 
+const PROVIDER_IDS = ["deepseek", "opencode-go", "opencode-zen"] as const;
+const PROVIDER_NAMES: Record<string, string> = {
+  deepseek: "DeepSeek",
+  "opencode-go": "OpenCode Go",
+  "opencode-zen": "OpenCode Zen",
+};
+
 const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
   const maxBalance = typeof options?.deepseekMaxBalance === "number" ? options.deepseekMaxBalance : 0;
   const [open, setOpen] = createSignal(api.kv?.get<boolean>("token-balance.quotaOpen", true) ?? true);
 
-  const vis = (() => {
+  const getEnabled = (): Record<string, boolean> => {
     const saved = api.kv?.get<Record<string, boolean>>("token-balance.providers");
     if (saved) return saved;
     const cfg = readPluginConfig();
     return cfg.providers ?? { deepseek: true, "opencode-go": true, "opencode-zen": true };
-  })();
+  };
+  const [enabled, setEnabled] = createSignal<Record<string, boolean>>(getEnabled());
 
   // ─── Commands ──────────────────────────────────────────────────────
 
@@ -56,6 +64,51 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
                   api.ui.toast({ variant: "success", message: `DeepSeek max balance set to $${num.toFixed(2)}` });
                 } else {
                   api.ui.toast({ variant: "error", message: "Invalid amount" });
+                }
+                api.ui.dialog?.clear();
+              },
+              onCancel() {
+                api.ui.dialog?.clear();
+              },
+            }),
+          );
+        },
+      },
+      {
+        namespace: "palette",
+        name: "token-balance.toggle-provider",
+        title: "Toggle Provider",
+        desc: "Show or hide a provider in the Quota sidebar",
+        category: "Token Balance",
+        slashName: "toggle-provider",
+        run() {
+          const cur = enabled();
+          api.ui?.dialog?.replace?.(() =>
+            api.ui.DialogPrompt({
+              title: "Toggle Provider",
+              description: () => {
+                const list = PROVIDER_IDS.map(
+                  (k) => `${PROVIDER_NAMES[k]}(${cur[k] !== false ? "on" : "off"})`,
+                ).join("  ");
+                return (
+                  <text fg={api.theme.current.textMuted} wrapMode="word">
+                    {`${list}\n\nEnter provider name to toggle:`}
+                  </text>
+                );
+              },
+              placeholder: "deepseek",
+              onConfirm(value: string) {
+                const k = value.trim().toLowerCase();
+                if ((PROVIDER_IDS as readonly string[]).includes(k)) {
+                  const next = { ...cur, [k]: cur[k] === false ? true : false };
+                  setEnabled(next);
+                  api.kv?.set("token-balance.providers", next);
+                  api.ui.toast({
+                    variant: "success",
+                    message: `${PROVIDER_NAMES[k]} ${next[k] ? "enabled" : "disabled"}`,
+                  });
+                } else {
+                  api.ui.toast({ variant: "error", message: "Use: deepseek, opencode-go, opencode-zen" });
                 }
                 api.ui.dialog?.clear();
               },
@@ -138,7 +191,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
 
               {isOpen ? (
                 <>
-                  {vis.deepseek !== false ? (
+                  {enabled().deepseek !== false ? (
                     <>
                       <text fg={t.textMuted} wrapMode="none">{"\uD83D\uDC33 DeepSeek"}</text>
                       <text fg={t.text} wrapMode="none">{balanceLine}</text>
@@ -152,7 +205,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
                     </>
                   ) : null}
 
-                  {vis["opencode-go"] !== false ? (
+                  {enabled()["opencode-go"] !== false ? (
                     <>
                       <text fg={t.textMuted} wrapMode="none">{"\uD83D\uDC19 OpenCode Go"}</text>
                       {g.map((line) => (
@@ -172,7 +225,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
                     </>
                   ) : null}
 
-                  {vis["opencode-zen"] !== false ? (
+                  {enabled()["opencode-zen"] !== false ? (
                     <>
                       <text fg={t.textMuted} wrapMode="none">{"\u26A1 OpenCode Zen"}</text>
                       <text fg={t.textMuted} wrapMode="none">

@@ -102,6 +102,7 @@ export OPENCODE_API_KEY=tu-key
 |---------|----------|
 | `/tb-setup` | Wizard de configuración para los 3 providers |
 | `/set-max-balance` | Define el saldo máximo USD de DeepSeek para el porcentaje |
+| `/toggle-provider` | Mostrar u ocultar un provider en la sidebar |
 
 ## Resolución de keys
 
