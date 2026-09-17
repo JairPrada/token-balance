@@ -1,7 +1,0 @@
-services:
-  opencode-test:
-    build: .
-    volumes:
-      - .:/app
-    stdin_open: true
-    tty: true
