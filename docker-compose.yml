@@ -1,0 +1,5 @@
+services:
+  opencode-test:
+    build: .
+    stdin_open: true
+    tty: true
