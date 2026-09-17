@@ -17,42 +17,21 @@ const id = "@openplugins/token-balance";
 const W = 35;
 const REFRESH_MS = 60_000;
 
-const PROVIDER_IDS = ["deepseek", "opencode-go", "opencode-zen"] as const;
-const PROVIDER_NAMES: Record<string, string> = {
-  deepseek: "DeepSeek",
-  "opencode-go": "OpenCode Go",
-  "opencode-zen": "OpenCode Zen",
-};
-
 const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
   const maxBalance = typeof options?.deepseekMaxBalance === "number" ? options.deepseekMaxBalance : 0;
   const [open, setOpen] = createSignal(api.kv?.get<boolean>("token-balance.quotaOpen", true) ?? true);
 
-  const getEnabled = (): Record<string, boolean> => {
+  const vis = (() => {
     const saved = api.kv?.get<Record<string, boolean>>("token-balance.providers");
     if (saved) return saved;
     const cfg = readPluginConfig();
     return cfg.providers ?? { deepseek: true, "opencode-go": true, "opencode-zen": true };
-  };
-  const [enabled, setEnabled] = createSignal<Record<string, boolean>>(getEnabled());
+  })();
 
   // ─── Commands ──────────────────────────────────────────────────────
 
   api.keymap?.registerLayer({
     commands: [
-      {
-        namespace: "palette",
-        name: "token-balance.toggle",
-        title: "Toggle Quota",
-        desc: "Collapse/expand the Quota sidebar panel",
-        category: "Token Balance",
-        slashName: "quota-toggle",
-        run() {
-          const v = !open();
-          setOpen(v);
-          api.kv?.set("token-balance.quotaOpen", v);
-        },
-      },
       {
         namespace: "palette",
         name: "token-balance.set-max-balance",
@@ -64,7 +43,11 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
           api.ui?.dialog?.replace?.(() =>
             api.ui.DialogPrompt({
               title: "DeepSeek Max Balance",
-              description: () => "Enter the total USD you loaded (e.g. 8 for $8):",
+              description: () => (
+                <text fg={api.theme.current.textMuted} wrapMode="word">
+                  {"Enter the total USD you loaded (e.g. 8 for $8):"}
+                </text>
+              ),
               placeholder: "8",
               onConfirm(value: string) {
                 const num = parseFloat(value);
@@ -73,47 +56,6 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
                   api.ui.toast({ variant: "success", message: `DeepSeek max balance set to $${num.toFixed(2)}` });
                 } else {
                   api.ui.toast({ variant: "error", message: "Invalid amount" });
-                }
-                api.ui.dialog?.clear();
-              },
-              onCancel() {
-                api.ui.dialog?.clear();
-              },
-            }),
-          );
-        },
-      },
-      {
-        namespace: "palette",
-        name: "token-balance.toggle-provider",
-        title: "Toggle Provider",
-        desc: "Show or hide a provider in the Quota sidebar",
-        category: "Token Balance",
-        slashName: "toggle-provider",
-        run() {
-          const cur = enabled();
-          api.ui?.dialog?.replace?.(() =>
-            api.ui.DialogPrompt({
-              title: "Toggle Provider",
-              description: () => {
-                const list = PROVIDER_IDS.map(
-                  (k) => `${PROVIDER_NAMES[k]}(${cur[k] !== false ? "on" : "off"})`,
-                ).join("  ");
-                return `${list}  — enter name to toggle`;
-              },
-              placeholder: "deepseek",
-              onConfirm(value: string) {
-                const k = value.trim().toLowerCase();
-                if ((PROVIDER_IDS as readonly string[]).includes(k)) {
-                  const next = { ...cur, [k]: cur[k] === false ? true : false };
-                  setEnabled(next);
-                  api.kv?.set("token-balance.providers", next);
-                  api.ui.toast({
-                    variant: "success",
-                    message: `${PROVIDER_NAMES[k]} ${next[k] ? "enabled" : "disabled"}`,
-                  });
-                } else {
-                  api.ui.toast({ variant: "error", message: "Use: deepseek, opencode-go, opencode-zen" });
                 }
                 api.ui.dialog?.clear();
               },
@@ -176,14 +118,13 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
           const z = zen();
           const isOpen = open();
           const arrow = isOpen ? "\u25BC" : "\u25B6";
-          const vis = enabled();
           const t = api.theme.current;
           const balanceLine = rpad("Total balance", W - d.value.length) + d.value;
 
           return (
             <box gap={0}>
               <text
-                fg={t.textMuted}
+                fg="white"
                 wrapMode="none"
                 onMouseDown={() => {
                   const v = !open();
