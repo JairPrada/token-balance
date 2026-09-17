@@ -1,6 +1,6 @@
 src/
 tsconfig.json
-scripts/
 .gitignore
 .npmignore
 *.log
+test-docker/
