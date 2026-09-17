@@ -15,7 +15,7 @@ RUN mkdir -p /root/.config/opencode && \
 
 # Install the plugin globally
 COPY openplugins-token-balance-*.tgz /tmp/
-RUN cd /tmp && npm install -g openplugins-token-balance-1.1.1.tgz 2>&1
+RUN cd /tmp && npm install -g openplugins-token-balance-*.tgz 2>&1
 
 # Copy test script
 COPY test-opencode.mjs /test.mjs

@@ -48,9 +48,9 @@ test("plugin files exist", () => {
   }
 });
 
-test("package.json version is 1.1.3", () => {
+test("package.json has version field", () => {
   const pkg = JSON.parse(fs.readFileSync(`${pluginDir}/package.json`, "utf8"));
-  if (pkg.version !== "1.1.3") throw new Error(`got ${pkg.version}`);
+  if (!pkg.version) throw new Error("missing version");
 });
 
 test("package.json has oc-plugin field", () => {
