@@ -3,16 +3,12 @@
   "version": "1.1.4",
   "description": "OpenCode sidebar plugin: DeepSeek, OpenCode Go and OpenCode Zen balance",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/tui.js",
+  "types": "./dist/tui.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    },
-    "./server": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "types": "./dist/tui.d.ts",
+      "default": "./dist/tui.js"
     },
     "./tui": {
       "types": "./dist/tui.d.ts",
@@ -20,7 +16,6 @@
     }
   },
   "oc-plugin": [
-    "server",
     "tui"
   ],
   "files": [
@@ -55,10 +50,7 @@
   },
   "devDependencies": {
     "@opencode-ai/plugin": "1.18.30",
-    "@opentui/core": "0.4.5",
-    "@opentui/solid": "0.4.5",
     "@types/node": "^22.0.0",
-    "solid-js": "^1.9.12",
     "tsup": "^8.0.0",
     "typescript": "^5.5.0"
   }

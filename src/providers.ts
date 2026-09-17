@@ -77,7 +77,7 @@ export async function fetchDS(max: number): Promise<DS> {
 
     const d = (await r.json()) as Record<string, unknown>;
     const infos = Array.isArray(d.balance_infos) ? d.balance_infos : [];
-    const usd = infos.find((i: any) => i.currency === "USD") ?? infos[0];
+    const usd = infos.find((i: { currency?: string; total_balance?: string }) => i.currency === "USD") ?? infos[0];
 
     if (usd?.total_balance) {
       const bal = parseFloat(usd.total_balance);
@@ -154,7 +154,7 @@ export async function fetchZen(): Promise<boolean> {
       {
         method: "GET",
         headers: {
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Gecko/20100101 Firefox/148.0",
+          "User-Agent": "token-balance/1.1",
           Accept: "text/html",
           Cookie: `auth=${cookie}`,
         },

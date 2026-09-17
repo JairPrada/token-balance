@@ -104,7 +104,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
               placeholder: "deepseek",
               onConfirm(value: string) {
                 const k = value.trim().toLowerCase();
-                if (PROVIDER_IDS.includes(k as any)) {
+                if ((PROVIDER_IDS as readonly string[]).includes(k)) {
                   const next = { ...cur, [k]: cur[k] === false ? true : false };
                   setEnabled(next);
                   api.kv?.set("token-balance.providers", next);

@@ -1,19 +1,19 @@
 # @openplugins/token-balance
 
-OpenCode sidebar plugin: DeepSeek, OpenCode Go, and OpenCode Zen balances in a single panel.
+Plugin de sidebar para OpenCode: muestra saldos de DeepSeek, OpenCode Go y OpenCode Zen en un solo panel.
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![npm](https://img.shields.io/npm/v/@openplugins/token-balance)
 
-## Features
+## Funcionalidades
 
-- **DeepSeek** — Credits balance in USD with usage bar
-- **OpenCode Go** — 5-hour, weekly, and monthly quotas with countdown
-- **OpenCode Zen** — Availability status
-- **Multi-source auth** — env vars, opencode.json, or auth.json
-- **Setup wizard** — `/tb-setup` for step-by-step configuration
-- **Provider control** — Show/hide via config or `/toggle-provider`
-- **Auto-refresh** — Updates every 60 seconds
+- **DeepSeek** — Saldo en USD con barra de uso
+- **OpenCode Go** — Cuotas de 5 horas, semanal y mensual con countdown
+- **OpenCode Zen** — Estado de disponibilidad
+- **Auth múltiple** — Variables de entorno, `opencode.json` o `auth.json`
+- **Wizard de setup** — `/tb-setup` para configuración paso a paso
+- **Control de providers** — Mostrar/ocultar vía config o `/toggle-provider`
+- **Auto-refresh** — Se actualiza cada 60 segundos
 
 ## Preview
 
@@ -26,7 +26,7 @@ Total balance               USD 7.48
 
 🐙 OpenCode Go
 Five-hour                    1h
-████████████████████████░   97% left
+████████████████████████    97% left
 Weekly                    5d 7h
 ████████████████████░░░░   90% left
 Monthly                  27d 9h
@@ -37,54 +37,54 @@ Disponibles                 ahora
 ██████████████████████████
 ```
 
-## Quick Start
+## Instalación rápida
 
 ```bash
-# 1. Install
+# 1. Instalar
 npm install -g @openplugins/token-balance
 
-# 2. Add to ~/.config/opencode/opencode.json
+# 2. Agregar a ~/.config/opencode/opencode.json
 { "plugin": ["@openplugins/token-balance"] }
 
-# 3. Restart opencode and run the wizard
+# 3. Reiniciar opencode y ejecutar el wizard
 /tb-setup
 ```
 
-## Commands
+## Comandos
 
-| Command | Description |
+| Comando | Descripción |
 |---------|-------------|
-| `/tb-setup` | Setup wizard for all providers |
-| `/quota-toggle` | Collapse/expand the Quota panel |
-| `/set-max-balance` | Set DeepSeek max USD for percentage bar |
-| `/toggle-provider` | Show or hide a provider |
+| `/tb-setup` | Wizard de configuración para todos los providers |
+| `/quota-toggle` | Colapsar/expandir el panel de Quota |
+| `/set-max-balance` | Establecer el saldo máximo USD de DeepSeek para la barra de porcentaje |
+| `/toggle-provider` | Mostrar u ocultar un provider |
 
-## Agent Configuration Guide
+## Guía para agentes de IA
 
-**For AI agents:** Follow these steps when a user installs this plugin.
+Cuando un usuario instale este plugin, seguir estos pasos:
 
-### 1. Verify installation
+### 1. Verificar instalación
 
 ```bash
 npm list -g @openplugins/token-balance
 ```
 
-If not installed:
+Si no está instalado:
 ```bash
 npm install -g @openplugins/token-balance
 ```
 
-Add to `~/.config/opencode/opencode.json`:
+Agregar a `~/.config/opencode/opencode.json`:
 ```json
 { "plugin": ["@openplugins/token-balance"] }
 ```
 
-### 2. Check existing config
+### 2. Verificar configuración existente
 
-Before asking for keys, check if already configured:
+Antes de pedir keys, verificar si ya está configurado:
 
 ```bash
-# Env vars
+# Variables de entorno
 echo $DEEPSEEK_API_KEY $OPENCODE_API_KEY
 
 # opencode.json
@@ -94,89 +94,89 @@ cat ~/.config/opencode/opencode.json | grep -A2 "provider"
 cat ~/.local/share/opencode/auth.json 2>/dev/null
 ```
 
-### 3. Configure missing providers
+### 3. Configurar providers faltantes
 
 **DeepSeek:**
-- "Do you have a DeepSeek API key? (platform.deepseek.com)"
-- If yes → `/tb-setup` → Step 1
-- If no → Create account at platform.deepseek.com
+- "¿Tienes una API key de DeepSeek? (platform.deepseek.com)"
+- Si → `/tb-setup` → Paso 1
+- No → Crear cuenta en platform.deepseek.com
 
 **OpenCode Go:**
-- "Do you use OpenCode Go?"
-- If yes → `/tb-setup` → Step 2
-- If no → Skip
+- "¿Usas OpenCode Go?"
+- Si → `/tb-setup` → Paso 2
+- No → Saltar
 
 **OpenCode Zen:**
-- "Do you use OpenCode Zen billing?"
-- If yes → `/tb-setup` → Step 3 (cookie + workspace ID)
-- If no → Skip
+- "¿Usas facturación de OpenCode Zen?"
+- Si → `/tb-setup` → Paso 3 (cookie + workspace ID)
+- No → Saltar
 
-### 4. Verify
+### 4. Verificar
 
-- ✅ Shows balance/quota = configured
-- ❌ "sin API key" = key missing
-- ❌ "sin configurar" = Zen cookie missing
+- ✅ Muestra saldo/cuota = configurado
+- ❌ "sin API key" = falta key
+- ❌ "sin configurar" = falta cookie de Zen
 
-### 5. Optional: DeepSeek max balance
+### 5. Opcional: saldo máximo DeepSeek
 
-Ask: "How much total USD did you load into DeepSeek?"
-Then: `/set-max-balance` → enter amount
+Preguntar: "¿Cuánto USD cargaste en DeepSeek?"
+Luego: `/set-max-balance` → ingresar monto
 
-## Key Resolution
+## Resolución de keys
 
-First match wins:
+Gana la primera coincidencia:
 
-| Priority | Source | Example |
-|----------|--------|---------|
-| 1 | Env var | `DEEPSEEK_API_KEY=sk-...` |
+| Prioridad | Fuente | Ejemplo |
+|-----------|--------|---------|
+| 1 | Variable de entorno | `DEEPSEEK_API_KEY=sk-...` |
 | 2 | opencode.json | `provider.deepseek.apiKey` |
-| 3 | token-balance config | `apiKeys.deepseek` (from `/tb-setup`) |
+| 3 | config del plugin | `apiKeys.deepseek` (desde `/tb-setup`) |
 | 4 | auth.json | `deepseek.key` |
 
-### Environment Variables
+### Variables de entorno
 
-| Provider | Var |
-|----------|-----|
+| Provider | Variable |
+|----------|----------|
 | DeepSeek | `DEEPSEEK_API_KEY` |
 | OpenCode Go | `OPENCODE_API_KEY` |
 | OpenCode Zen | `OPENCODE_API_KEY` |
 
-### auth.json Paths
+### Rutas de auth.json
 
-| Platform | Path |
-|----------|------|
+| Plataforma | Ruta |
+|------------|------|
 | Linux | `~/.local/share/opencode/auth.json` |
 | macOS | `~/Library/Application Support/opencode/auth.json` |
-| Windows | `%LOCALAPPDATA%\opencode\auth.json` |
+| Windows | `%APPDATA%\opencode\auth.json` o `%LOCALAPPDATA%\opencode\auth.json` |
 
-## Error Messages
+## Mensajes de error
 
-| Message | Fix |
-|---------|-----|
-| `sin API key` | Run `/tb-setup` or configure env var/opencode.json |
-| `error 401` | Invalid key → re-login |
-| `error de conexion` | Network issue |
-| `sin datos` | API returned empty → retry |
-| `sin configurar` | Zen cookie missing → `/tb-setup` |
+| Mensaje | Solución |
+|---------|----------|
+| `sin API key` | Ejecutar `/tb-setup` o configurar env var/opencode.json |
+| `error 401` | Key inválida → re-login |
+| `error de conexion` | Problema de red |
+| `sin datos` | API devolvió vacío → reintentar |
+| `sin configurar` | Falta cookie de Zen → `/tb-setup` |
 
-## Troubleshooting
+## Solución de problemas
 
-**Sidebar not showing:**
+**No aparece la sidebar:**
 1. `npm list -g @openplugins/token-balance`
-2. Check `opencode.json` has plugin
-3. Restart opencode
+2. Verificar que `opencode.json` tenga el plugin
+3. Reiniciar opencode
 
-**Bars not showing:**
-- DeepSeek: Set max balance via `/set-max-balance`
-- Go: Shows when API responds
-- Zen: Requires cookie config
+**No aparecen las barras:**
+- DeepSeek: Establecer saldo máximo con `/set-max-balance`
+- Go: Se muestra cuando la API responde
+- Zen: Requiere configuración de cookie
 
-## Security
+## Seguridad
 
-- Credentials read from existing config (not stored by plugin)
-- No telemetry
-- Config writes only to `~/.config/opencode/token-balance/config.json`
+- Las credenciales se leen de configuración existente (no se guardan por el plugin)
+- Sin telemetría
+- Solo escribe en `~/.config/opencode/token-balance/config.json`
 
-## License
+## Licencia
 
 MIT

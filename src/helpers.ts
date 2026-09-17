@@ -47,7 +47,11 @@ export function formatTime(ms: number): string {
 export function safeJson<T>(f: string): T | undefined {
   try {
     return JSON.parse(fs.readFileSync(f, "utf8")) as T;
-  } catch {
+  } catch (e: unknown) {
+    if (fs.existsSync(f)) {
+      const msg = e instanceof Error ? e.message : String(e);
+      process.stderr.write(`[token-balance] malformed JSON in ${f}: ${msg}\n`);
+    }
     return undefined;
   }
 }

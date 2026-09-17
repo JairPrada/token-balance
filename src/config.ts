@@ -13,6 +13,25 @@ import { safeJson } from "./helpers.js";
 const HOME = os.homedir();
 const CFG_DIR = process.env.OPENCODE_CONFIG_DIR;
 
+// ─── Cache (valid for one refresh cycle) ──────────────────────────────────
+
+let _authCache: { ts: number; val: Record<string, AuthEntry> | undefined } | null = null;
+let _pluginCfgCache: { ts: number; val: PluginConfig } | null = null;
+let _ocCfgCache: { ts: number; val: OpencodeConfig | undefined } | null = null;
+const CACHE_TTL = 5_000; // 5 seconds
+
+function cached<T>(cache: { ts: number; val: T } | null, compute: () => T): T {
+  if (cache && Date.now() - cache.ts < CACHE_TTL) return cache.val;
+  const val = compute();
+  return val as T;
+}
+
+export function resetConfigCache(): void {
+  _authCache = null;
+  _pluginCfgCache = null;
+  _ocCfgCache = null;
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────
 
 export interface AuthEntry {
@@ -108,24 +127,38 @@ function readFirst<T>(paths: string[]): T | undefined {
 // ─── Public Read Functions ───────────────────────────────────────────────
 
 export function readAuth(): Record<string, AuthEntry> | undefined {
-  return readFirst<Record<string, AuthEntry>>(getAuthPaths());
+  return cached(_authCache, () => {
+    const val = readFirst<Record<string, AuthEntry>>(getAuthPaths());
+    _authCache = { ts: Date.now(), val };
+    return val;
+  });
 }
 
 export function readPluginConfig(): PluginConfig {
-  const cfg = readFirst<PluginConfig>(getPluginConfigPaths());
-  if (cfg?.zen?.workspaceId && cfg?.zen?.authCookie) return cfg;
-
-  // Fallback: old opencode-quota config (flat structure)
-  const old = readFirst<{ workspaceId?: string; authCookie?: string }>(getOldZenConfigPaths());
-  if (old?.workspaceId && old?.authCookie) {
-    return { ...cfg, zen: { workspaceId: old.workspaceId, authCookie: old.authCookie } };
-  }
-
-  return cfg ?? {};
+  return cached(_pluginCfgCache, () => {
+    const cfg = readFirst<PluginConfig>(getPluginConfigPaths());
+    let val: PluginConfig;
+    if (cfg?.zen?.workspaceId && cfg?.zen?.authCookie) {
+      val = cfg;
+    } else {
+      const old = readFirst<{ workspaceId?: string; authCookie?: string }>(getOldZenConfigPaths());
+      if (old?.workspaceId && old?.authCookie) {
+        val = { ...cfg, zen: { workspaceId: old.workspaceId, authCookie: old.authCookie } };
+      } else {
+        val = cfg ?? {};
+      }
+    }
+    _pluginCfgCache = { ts: Date.now(), val };
+    return val;
+  });
 }
 
 export function readOpencodeConfig(): OpencodeConfig | undefined {
-  return readFirst<OpencodeConfig>(getOpencodeConfigPaths());
+  return cached(_ocCfgCache, () => {
+    const val = readFirst<OpencodeConfig>(getOpencodeConfigPaths());
+    _ocCfgCache = { ts: Date.now(), val };
+    return val;
+  });
 }
 
 // ─── Config Directory & Write ────────────────────────────────────────────
